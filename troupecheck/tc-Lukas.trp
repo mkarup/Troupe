@@ -1,7 +1,5 @@
 import lists
 
-datatype Atoms = Success | Failure
-
 (* Generates a random Number in the interval ]0;1000000000[ (Note: generates a decimal!) *)
 let fun generate_number() = 
         let val rnd = random()*10 
@@ -54,11 +52,11 @@ let fun generate_number() =
     noOfArgs - number of arguments the property function takes.
     noOfTests - number of tests to be run.
     generator - the function that should be used to generate input values. *)
-    fun core_forall (generator, prop, 0) = (Success, (), ())
+    fun core_forall (generator, prop, 0) = (true, (), ())
         |core_forall (generator, prop, i) =    
             let val args = generator() in
             if prop (args) then core_forall (generator, prop, i-1)
-            else (Failure, args, i) end
+            else (false, args, i) end
     
 (* Tests a property function - by default 100 times.
     noOfArgs - number of arguemnts the property takes  
@@ -67,12 +65,12 @@ let fun generate_number() =
     fun tc generator prop = 
         let val (succRes, args, leftOverTests) = core_forall (generator, prop, 100) in 
             case succRes of
-            Failure => print "Failure at input:";
+            false => print "Failure at input:";
                         print args;
                         print "After running:";
                         print (100-leftOverTests);
                         print "tests..."
-            | Success => print "OK: Passed after 100 tests!"
+            | true => print "OK: Passed after 100 tests!"
             end
 
 (* Tests a property function a given number of times.
@@ -82,12 +80,12 @@ let fun generate_number() =
     fun tc_n generator prop noOfTests = 
     let val (succRes, args, leftOverTests) = core_forall (generator, prop, noOfTests) in 
             case succRes of
-            Failure => print "Failure at input:";
+            false => print "Failure at input:";
                         print args;
                         print "After running:";
                         print noOfTests-leftOverTests;
                         print "tests..."
-            | Success => let val _ = print "OK: Passed after"
+            | true => let val _ = print "OK: Passed after"
                              val _ = print noOfTests in  
                              print "tests!" end
             end
@@ -100,7 +98,7 @@ let fun generate_number() =
 (* A succesful property for numbers created for testing purposes 
     x,y - should be numbers. *)
     fun number_commutative (x, y) = 
-        x < y
+        x * y = y * x
 
     fun my_reverse xs = 
         xs
