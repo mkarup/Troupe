@@ -68,7 +68,7 @@ let fun generate_number() =
             false => print "Failure at input:";
                         print args;
                         print "After running:";
-                        print (100-leftOverTests);
+                        print (100-leftOverTests+1);
                         print "tests..."
             | true => print "OK: Passed after 100 tests!"
             end
@@ -83,7 +83,7 @@ let fun generate_number() =
             false => print "Failure at input:";
                         print args;
                         print "After running:";
-                        print noOfTests-leftOverTests;
+                        print (noOfTests-leftOverTests+1);
                         print "tests..."
             | true => let val _ = print "OK: Passed after"
                              val _ = print noOfTests in  
@@ -105,9 +105,13 @@ let fun generate_number() =
 (* A succesful property for lists created for testing purposes 
     xs - should be a list. *)
     fun list_reverse xs = 
-        reverse xs = my_reverse xs
+        reverse(reverse xs) = xs
     in
 
+    print "Testing on bools:";
+    tc (fn () => (generate_bool(), generate_bool())) (fn(x,y) => bool_commutative x y);
+    print "Testing on numbers:";
+    tc (fn () => (generate_number(), generate_number())) number_commutative;
     print "Testing on lists:";
-    tc (fn () => (generate_number(), generate_number())) number_commutative end
+    tc (fn () => (generate_list())) list_reverse end
 
