@@ -1,6 +1,6 @@
 import lists
 
-let         
+let       
 (* Generates a random boolean *) 
     fun generate_bool noOfTests = 
         let val rnd = random()*10 
@@ -20,6 +20,11 @@ let
     fun generate_int noOfTests = 
         floor (generate_float(noOfTests))
 
+
+    fun pick_rand_int (i) = 
+        let val seed = generate_int i in
+        if seed < 0 then (-seed) mod (i+1) else 
+        seed mod (i+1) end
 (* Create a list of some determined size.
     f - the function determining what to element to put into the list.
     i - the number of elements to be added to the list. *)
@@ -32,7 +37,7 @@ let
     generator - the generator that should be used to create elements. 
     noOfTests - some non negative integer *)
     and generate_list_of (generator) noOfTests = 
-        let val size = generate_int(noOfTests) in
+        let val size = pick_rand_int(noOfTests) in
         make_list ((fn () => generator noOfTests), size) end
 
 (* Generates a random generator
@@ -111,11 +116,23 @@ let
     xs - should be a list. *)
     fun list_reverse xs = 
         reverse(reverse xs) = xs
+    
+    fun pick_rand_int_stays_in_interval i = 
+        pick_rand_int i <= i
+    
+    fun pick_rand_int_stays_in_interval_fifty() = 
+        pick_rand_int 50 <= 50
     in
 
-    print "Testing on bools:";
+    print "Testing on bools commutative:";
     tc (fn i => (generate_bool i, generate_bool i)) (fn(x,y) => bool_commutative x y);
-    print "Testing on numbers:";
+    print "Testing on numbers commutative:";
     tc (fn i => (generate_int i, generate_int i)) number_commutative;
-    print "Testing on lists:";
-    tc (fn i => (generate_list_of(generate_int) i)) list_reverse end
+    print "Testing on list reverse:";
+    tc (fn i => (generate_list_of(generate_int) i)) list_reverse; 
+    print "Testing on pick_rand_int:";
+    tc_n (fn i => let val x = generate_int i in 
+                    if x < 0 then -x else x end) pick_rand_int_stays_in_interval 1000;
+    print "Testing on pick_rand_int (again):";
+    tc (fn i => ()) pick_rand_int_stays_in_interval_fifty
+    end
