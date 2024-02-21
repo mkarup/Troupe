@@ -1,105 +1,96 @@
 import lists
 
-datatype Atoms = Success | Failure
-
-(* Generates a random Number in the interval ]0;1000000000[ (Note: generates a decimal!) *)
-let fun generate_number() = 
-        let val rnd = random()*10 
-            val mult =  if rnd < 1 then 10 else
-                        if rnd < 2 then 100 else
-                        if rnd < 3 then 1000 else
-                        if rnd < 4 then 10000 else
-                        if rnd < 5 then 100000 else
-                        if rnd < 6 then 1000000 else
-                        if rnd < 7 then 10000000 else
-                        if rnd < 8 then 100000000 else
-                        if rnd < 9 then 1000000000 else
-                        1 in
-        random()*mult end
-        
-(* Generates a random boolean *)        
-    fun generate_bool() = 
+let         
+(* Generates a random boolean *) 
+    fun generate_bool noOfTests = 
         let val rnd = random()*10 
             val res =  if rnd < 5 then false
                        else true in
         res end
 
-(* Helper function to create a list of some determined size.
+(* Generates a random float based on number of tests that has been run so far. 
+    noOfTests - a non negative integer to determin the size*)
+    fun generate_float noOfTests = 
+        let val x = random()*noOfTests 
+            val is_pos = generate_bool() in 
+        if is_pos then x else (-x) end
+
+(* Generates a random integer based on number of tests that has been run so far. 
+    noOfTests - a non negative integer to determin the size*)
+    fun generate_int noOfTests = 
+        floor (generate_float(noOfTests))
+
+(* Create a list of some determined size.
     f - the function determining what to element to put into the list.
     i - the number of elements to be added to the list. *)
     fun make_list (f, i) = 
         case i of 
         0 => []
         | _ => append [f()] (make_list (f, i-1))
+
+(* Generates a randomly sized list of some specified type of elements.
+    generator - the generator that should be used to create elements. 
+    noOfTests - some non negative integer *)
+    and generate_list_of (generator) noOfTests = 
+        let val size = generate_int(noOfTests) in
+        make_list ((fn () => generator noOfTests), size) end
+
+(* Generates a random generator
+    noOfTests - some non negative integer *)
+    fun generate_generator noOfTests = 
+        let val rnd = random()
+            val res = if rnd <= 1/3 then (fn() => generate_int()) else 
+                      if rnd <= 2/3 then (fn() => generate_bool()) else 
+                     (fn() => generate_list_of(generate_int)) in
+        res end
     
-(* Generates a random list of random Numbers with size interval [0;9] *)
-    fun generate_list() = 
-        let val rnd = random()*10 
-            val noOfItems =  if rnd < 1 then 0 else
-                        if rnd < 2 then 1 else
-                        if rnd < 3 then 2 else
-                        if rnd < 4 then 3 else
-                        if rnd < 5 then 4 else
-                        if rnd < 6 then 5 else
-                        if rnd < 7 then 6 else
-                        if rnd < 8 then 7 else
-                        if rnd < 9 then 8 else
-                        9 in
-        make_list (generate_number, noOfItems) end
+(* Generates a randomly sized list of a randomly chosen type of elements
+    noOfTests - some non negative integer *)
+    and generate_list noOfTests = 
+        let val generator = generate_generator noOfTests in 
+        generate_list_of(generator) noOfTests end
 
-(* Runs a property with some arguments. 
-    prop - the property function to test.
-    args - a list of arguments - must match number of arguments needed for the property function. *)
-    fun run_test (prop, args) = 
-        let val res = 
-            case args of 
-                [] => prop
-                | (x::xs) => 
-                    let val newProp = prop x in run_test(newProp, xs) end
-        in res end 
 
-(* Runs a single test and determines wether result is a Success or a Failure 
-    prop - the property function to test.
-    args - a list of arguments - must match number of arguments needed for the property function. *)
-    fun check_success prop args =
-        if run_test (prop, args) then (Success, []) else (Failure, args)
-
-(* Runs however many tests specified on a single (Number)property, while always generating new inputs. 
+(* Runs however many tests specified on a property, while always generating new inputs. 
     Drops further execution if a Failure is found. 
     prop - the property function to test.
     noOfArgs - number of arguments the property function takes.
     noOfTests - number of tests to be run.
     generator - the function that should be used to generate input values. *)
-    fun run_all_tests (prop, noOfArgs, noOfTests, generator) =
-        let val argsList = make_list (generator, noOfArgs)
-            val (succRes, args) = check_success prop argsList
-            val res = 
-                case succRes of
-                         Failure => (Failure, args)
-                        | Success => 
-                            case noOfTests of
-                                 0 => (Success, [])
-                                |_ => run_all_tests (prop, noOfArgs, noOfTests-1, generator)
-        in res end
+    fun core_forall (generator, prop, 0, noOfTests) = (true, (), ())
+        |core_forall (generator, prop, i, noOfTests) =    
+            let val args = generator noOfTests in
+            if prop args then core_forall (generator, prop, i-1, noOfTests+1)
+            else (false, args, noOfTests) end
     
 (* Tests a property function - by default 100 times.
     noOfArgs - number of arguemnts the property takes  
     generator - the generator function to generate inputs
-    prop - the property function to test.
-    (Optional) noOfTests - how many tests should be run*)
-    fun tc noOfArgs generator prop = 
-        let val (succRes, args) = run_all_tests (prop, noOfArgs, 100, generator) in 
+    prop - the property function to test. *)
+    fun tc generator prop = 
+        let val (succRes, args, successfulTests) = core_forall (generator, prop, 100, 0) in 
             case succRes of
-            Failure => let val _ = print "Failure at input: "
-                                        in print args end 
-            | Success => print "OK: Passed after 100 tests!"
+            false => print "Failure at input:";
+                        print args;
+                        print "After running:";
+                        print (successfulTests+1);
+                        print "tests"
+            | true => print "OK: Passed after 100 tests!"
             end
-    fun tc noOfArgs generator prop noOfTests = 
-    let val (succRes, args) = run_all_tests (prop, noOfArgs, noOfTests, generator) in 
+
+(* Tests a property function a given number of times.
+    generator - the generator function to generate inputs
+    prop - the property function to test.
+    noOfTests - how many tests should be run. *)
+    fun tc_n generator prop noOfTests = 
+    let val (succRes, args, successfulTests) = core_forall (generator, prop, noOfTests, 0) in 
             case succRes of
-            Failure => let val _ = print "Failure at input: "
-                                        in print args end 
-            | Success => let val _ = print "OK: Passed after"
+            false => print "Failure at input:";
+                        print args;
+                        print "After running:";
+                        print (successfulTests+1);
+                        print "test(s)"
+            | true => let val _ = print "OK: Passed after"
                              val _ = print noOfTests in  
                              print "tests!" end
             end
@@ -111,19 +102,20 @@ let fun generate_number() =
     
 (* A succesful property for numbers created for testing purposes 
     x,y - should be numbers. *)
-    fun number_commutative x y = 
-        x * y = y * x
+    fun number_commutative (x, y) = 
+        x < y
 
+    fun my_reverse xs = 
+        xs
 (* A succesful property for lists created for testing purposes 
     xs - should be a list. *)
     fun list_reverse xs = 
         reverse(reverse xs) = xs
+    in
 
-    val _ = print "Testing on lists:"
-    val listTestRes = tc 1 generate_list list_reverse 3
-    val _ = print "Testing on bools:"
-    val boolTestRes = tc 2 generate_bool bool_commutative 3
-    val _ = print "Testing on numbers:"
-    val numberTestRes = tc 2 generate_number number_commutative 2
-in print "done" end
-
+    print "Testing on bools:";
+    tc (fn i => (generate_bool i, generate_bool i)) (fn(x,y) => bool_commutative x y);
+    print "Testing on numbers:";
+    tc (fn i => (generate_int i, generate_int i)) number_commutative;
+    print "Testing on lists:";
+    tc (fn i => (generate_list_of(generate_int) i)) list_reverse end
