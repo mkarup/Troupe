@@ -33,3 +33,4 @@ yarn-error.log
 bin/troupe
 bin/understudy
 trp-rt/out/
+troupecheck/test.trp
