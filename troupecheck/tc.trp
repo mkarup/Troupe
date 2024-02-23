@@ -1,6 +1,7 @@
 import lists
 
 let       
+(* -----------------GENERATORS AND UTILS--------------------------*)
 (* Generates a random boolean *) 
     fun generate_bool () = 
         let val rnd = random()*10 
@@ -83,7 +84,8 @@ let
             fun fold f acc 0 = acc 
             | fold f acc i = fold f (acc ^ f()) (i-1) in 
         fold generate_char "" x end
-
+        
+(* -----------------CORE FUNCTIONALITY--------------------------*)
 (* Runs however many tests specified on a property, while always generating new inputs. 
     Drops further execution if a Failure is found. 
     prop - the property function to test.
