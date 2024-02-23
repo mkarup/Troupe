@@ -1,4 +1,5 @@
 import lists
+
 let       
 (* -----------------GENERATORS AND UTILS--------------------------*)
 (* Generates a random boolean *) 
@@ -91,22 +92,10 @@ let
     fun generate_pos_int noOfTests =
         abs_value(generate_int noOfTests)
     
-    fun run_gen f i= 
-        case f of 
-            generate_bool => generate_bool()
-            | generate_char => generate_char()
-            | _ => f i
-
-    fun make_func xs =
-        case xs of 
-            [] => fn i => ()
-            | _ => 
-                let fun make_func_aux f [] = f 
-                | make_func_aux f (x::xs) = make_func_aux (fn i => (f i, run_gen x i)) xs
-                in 
-                make_func_aux (fn i => ()) (reverse xs) end
-
-
+    fun sign x =
+        if x = 0 then 0
+        else if x > 0 then 1
+        else -1
 (* -----------------CORE FUNCTIONALITY--------------------------*)
 (* Runs however many tests specified on a property, while always generating new inputs. 
     Drops further execution if a Failure is found. 
@@ -154,6 +143,20 @@ let
     fun my_floor i =
         if i >=0 then i - (i mod 1)
         else i - (i mod 1) - 1
+    
+    fun my_ceil_1 i =
+        if i > 0 then i + (1 - (i mod 1))
+        else i + (1 - (i mod 1)) - 1
+    
+    fun my_ceil_2 i =
+        if i > 0 then (my_floor i) + 1
+        else if i = 0 then 0
+        else (my_floor i) + 1
+    
+    (*Virker ikke for negative tal (endnu)*)
+    fun my_mod x y =
+        if y = 0 then 0
+        else x - (my_floor(x/y) * y)
 
 (* A succesful boolean property created for testing purposes 
     x,y - should be booleans *)
@@ -180,11 +183,24 @@ let
     
     fun my_floor_test i =
         my_floor i = floor i
+
+    fun my_ceil_1_test i =
+        my_ceil_1 i = ceil i
+    
+    fun my_ceil_2_test i =
+        my_ceil_2 i = ceil i
+    
+    fun both_ceil_test i =
+        my_ceil_1 i = my_ceil_1 i
+    
+    fun my_mod_test (x, y) =
+        if y = 0 then true
+        else my_mod x y = (x mod y)
     
     in
 
     print "Testing on bools commutative:";
-    tc (make_func [generate_bool, generate_bool]) (fn(x,y) => bool_commutative x y);
+    tc (fn i => (generate_bool (), generate_bool ())) (fn(x,y) => bool_commutative x y);
     print "Testing on numbers commutative:";
     tc (fn i => (generate_int i, generate_int i)) number_commutative;
     print "Testing on list reverse:";
@@ -196,5 +212,13 @@ let
     print "Testing on abs_value:";
     tc  (fn i => (one_of_two generate_int generate_float) i) abs_value_is_always_pos;
     print "Testing on my_floor:";
-    tc  (fn i => generate_float i) my_floor_test
+    tc  (fn i => generate_float i) my_floor_test;
+    print "Testing on my_ceil_1:";
+    tc  (fn i => generate_float i) my_ceil_1_test;
+    print "Testing on my_ceil_2:";
+    tc  (fn i => generate_float i) my_ceil_2_test;
+    print "Testing on both ceil functions:";
+    tc  (fn i => generate_float i) both_ceil_test;
+    print "Testing on my_mod:";
+    tc  (fn i => (generate_int i, generate_int i)) my_mod_test
     end
