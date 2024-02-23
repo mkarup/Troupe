@@ -23,10 +23,6 @@ let
 
 (* Generates a random positive integer based on number of tests that has been run so far. 
     noOfTests - a non negative integer to determin the size*)
-    fun generate_pos_int noOfTests = 
-        let val x = floor (generate_float(noOfTests)) in 
-        if x < 0 then -x else x end
-    
     fun pick_rand_int (i) = 
         let val seed = generate_int i in
         if seed < 0 then (-seed) mod (i+1) else 
@@ -84,7 +80,17 @@ let
             fun fold f acc 0 = acc 
             | fold f acc i = fold f (acc ^ f()) (i-1) in 
         fold generate_char "" x end
-        
+    
+    fun one_of_two x y =
+        let val bool = generate_bool () in
+            if bool then x
+            else y end
+    
+    fun abs_value x = 
+        if x < 0 then -x else x 
+    
+    fun generate_pos_int noOfTests =
+        abs_value(generate_int noOfTests)
 (* -----------------CORE FUNCTIONALITY--------------------------*)
 (* Runs however many tests specified on a property, while always generating new inputs. 
     Drops further execution if a Failure is found. 
@@ -125,6 +131,14 @@ let
             | true => print ("Success: Passed all " ^ (toString noOfTests) ^ " test(s).")
             end
     
+(* *) 
+    fun my_reverse xs = 
+        xs
+    
+    fun my_floor i =
+        if i >=0 then i - (i mod 1)
+        else i - (i mod 1) - 1
+
 (* A succesful boolean property created for testing purposes 
     x,y - should be booleans *)
     fun bool_commutative x y = 
@@ -133,10 +147,7 @@ let
 (* A succesful property for numbers created for testing purposes 
     x,y - should be numbers. *)
     fun number_commutative (x, y) = 
-        x < y
-
-    fun my_reverse xs = 
-        xs
+        x * y = y * x
 (* A succesful property for lists created for testing purposes 
     xs - should be a list. *)
     fun list_reverse xs = 
@@ -145,8 +156,14 @@ let
     fun pick_rand_int_stays_in_interval i = 
         pick_rand_int i <= i
     
+    fun abs_value_is_always_pos i =
+        abs_value i >= 0
+    
     fun pick_rand_int_stays_in_interval_fifty() = 
         pick_rand_int 50 <= 50
+    
+    fun my_floor_test i =
+        my_floor i = floor i
     
     in
 
@@ -159,5 +176,9 @@ let
     print "Testing on pick_rand_int:";
     tc_n (fn i => generate_pos_int i) pick_rand_int_stays_in_interval 1000;
     print "Testing on pick_rand_int (again):";
-    tc (fn i => ()) pick_rand_int_stays_in_interval_fifty
+    tc (fn i => ()) pick_rand_int_stays_in_interval_fifty;
+    print "Testing on abs_value:";
+    tc  (fn i => (one_of_two generate_int generate_float) i) abs_value_is_always_pos;
+    print "Testing on my_floor:";
+    tc  (fn i => generate_float i) my_floor_test
     end
