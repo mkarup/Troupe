@@ -79,7 +79,7 @@ let
             | fold f acc i = fold f (acc ^ f()) (i-1) in 
         fold char_gen "" x end
     
-    fun one_of_two x y =
+    fun one_of_two (x, y) =
         let val bool = bool_gen 0 in
             if bool then x
             else y end
@@ -126,8 +126,40 @@ let
                         print ("After running: " ^ (toString (successfulTests+1)) ^ " test(s)")
             | true => print ("Success: Passed all " ^ (toString noOfTests) ^ " test(s).")
             end
+(* User convenience functions *)
+    fun integer() = int_gen(inf, inf)
+        | integer (h, l) = int_gen(h, l)
     
-(* *) 
+    fun pos_integer() = int_gen(0, inf)
+
+    fun neg_integer() = int_gen(inf, 0)
+
+    fun float() = float_gen(inf, inf)
+        | float(h, l) = float_gen(h, l)
+
+    fun pos_float() = float_gen(0, inf)
+
+    fun neg_float() = float_gen(inf, 0)
+
+    fun boolean() = bool_gen
+
+    fun list() = list_gen(generator_gen)
+        |list(type) = list_gen(type)
+
+    fun string() = string_gen
+
+    fun char() = char_gen
+
+    fun tuple ts =
+        case ts of 
+            [] => (fn i => ())
+            | (y::ys) => 
+                let fun tuple_aux (f, []) = f 
+                | tuple_aux (f, (x::xs)) = tuple_aux ((fn i => (f i, x i)), xs)
+                in 
+                tuple_aux ((fn i => y i), ys) end
+    
+(* functions to test with *) 
     fun my_reverse xs = 
         xs
     
@@ -144,17 +176,13 @@ let
                 if y = x then 1 else 0 
             in 
             z + my_count y xs end
-(* A succesful boolean property created for testing purposes 
-    x,y - should be booleans *)
+(* Propterties to test*)
     fun bool_commutative x y = 
         (x andalso y) = (y andalso x)
     
-(* A succesful property for numbers created for testing purposes 
-    x,y - should be numbers. *)
     fun number_commutative (x, y) = 
         x * y = y * x
-(* A succesful property for lists created for testing purposes 
-    xs - should be a list. *)
+
     fun list_reverse xs = 
         reverse(reverse xs) = xs
     
@@ -179,21 +207,21 @@ let
     in
 
     print "Testing on bools commutative:";
-    tc (fn i => (bool_gen i, bool_gen i)) (fn(x,y) => bool_commutative x y);
+    tc (tuple [boolean(), boolean()]) (fn(x,y) => bool_commutative x y);
     print "Testing on numbers commutative:";
-    tc (fn i => (int_gen(inf, inf) i, int_gen(inf, inf) i)) number_commutative;
+    tc (tuple [integer(), integer()]) number_commutative;
     print "Testing on list reverse:";
-    tc (fn i => (list_gen(int_gen) i )) list_reverse; 
+    tc (list(integer())) list_reverse; 
     print "Testing on int_gen interval:";
-    tc_n (fn i => int_gen(0, inf) i) int_gen_stays_in_interval 1000;
+    tc_n (pos_integer()) int_gen_stays_in_interval 1000;
     print "Testing on abs_value:";
-    tc  (fn i => (one_of_two (int_gen(inf, inf)) (float_gen(inf, inf))) i) abs_value_is_always_pos;
+    tc  (one_of_two (integer(), float())) abs_value_is_always_pos;
     print "Testing on my_floor:";
-    tc  (fn i => float_gen(inf, inf) i) my_floor_test; 
+    tc  (float()) my_floor_test; 
     print "Testing that my_count always return non-negative result:";
-    tc_n (fn i => (int_gen(inf,inf) i, list_gen(int_gen(inf,inf)) i)) my_count_returns_non_negative_int 1000;
+    tc_n (tuple ([integer(), list(integer())])) my_count_returns_non_negative_int 1000;
     print "Testing my_length:";
-    tc (fn i => list_gen (generator_gen) i) my_length_test;
+    tc (list()) my_length_test;
     print "Testing make_list:";
-    tc (fn i => int_gen(0, inf) i) make_list_test
+    tc (pos_integer()) make_list_test 
     end
