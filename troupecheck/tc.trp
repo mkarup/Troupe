@@ -1,5 +1,13 @@
 import lists
 let      
+(* ----------------USED FOR PRINTING TO CONSOLE-------------------- *)
+    val out = getStdout authority
+    fun write x = fwrite (out, x)
+    fun tc_toString x =
+        case x of 
+            (y, ys) => "(" ^ (tc_toString y) ^ ", " ^ (tc_toString ys) ^ ")"
+            | (y::ys) => "[" ^ (tc_toString y) ^ ", " ^ (tc_toString ys) ^ "]"
+            | _ => toString x
 (* -----------------GENERATORS AND UTILS--------------------------*)
     val inf = 1 / 0
 (* Generates a random boolean *) 
@@ -108,10 +116,10 @@ let
     fun tc generator prop = 
         let val (succRes, args, successfulTests) = core_forall (generator, prop, 100, 0) in 
             case succRes of
-            false => print "Failure at input:";
-                        print args;
-                        print ("After running: " ^ (toString (successfulTests+1)) ^ " test(s)")
-            | true => print "OK: Passed after 100 tests!"
+            false => write "Failure at input: ";
+                        write (tc_toString args);
+                        write ("\nAfter running: " ^ (toString (successfulTests+1)) ^ " test(s)\n")
+            | true => write "OK: Passed after 100 tests!\n"
             end
 
 (* Tests a property function a given number of times.
@@ -121,12 +129,12 @@ let
     fun tc_n generator prop noOfTests = 
     let val (succRes, args, successfulTests) = core_forall (generator, prop, noOfTests, 0) in 
             case succRes of
-            false => print "Failure at input:";
-                        print args;
-                        print ("After running: " ^ (toString (successfulTests+1)) ^ " test(s)")
-            | true => print ("Success: Passed all " ^ (toString noOfTests) ^ " test(s).")
+            false => write "Failure at input: ";
+                        write args;
+                        write ("\nAfter running: " ^ (toString (successfulTests+1)) ^ " test(s)\n")
+            | true => write ("Success: Passed all " ^ (toString noOfTests) ^ " test(s).\n")
             end
-(* User convenience functions *)
+(* --------------------------User convenience functions -------------------------*)
     fun integer() = int_gen(inf, inf)
         | integer (h, l) = int_gen(h, l)
     
@@ -159,7 +167,7 @@ let
                 in 
                 tuple_aux ((fn i => y i), ys) end
     
-(* functions to test with *) 
+(* --------------------------functions to test on-------------------------------- *) 
     fun my_reverse xs = 
         xs
     
@@ -176,12 +184,12 @@ let
                 if y = x then 1 else 0 
             in 
             z + my_count y xs end
-(* Propterties to test*)
+(* --------------------------Propterties to run-------------------------*)
     fun bool_commutative x y = 
         (x andalso y) = (y andalso x)
     
     fun number_commutative (x, y) = 
-        x * y = y * x
+        x = y
 
     fun list_reverse xs = 
         reverse(reverse xs) = xs
@@ -206,22 +214,22 @@ let
     
     in
 
-    print "Testing on bools commutative:";
+    write "Testing on bools commutative:\n";
     tc (tuple [boolean(), boolean()]) (fn(x,y) => bool_commutative x y);
-    print "Testing on numbers commutative:";
+    write "Testing on numbers commutative:\n";
     tc (tuple [integer(), integer()]) number_commutative;
-    print "Testing on list reverse:";
+    write "Testing on list reverse:\n";
     tc (list(integer())) list_reverse; 
-    print "Testing on int_gen interval:";
+    write "Testing on int_gen interval:\n";
     tc_n (pos_integer()) int_gen_stays_in_interval 1000;
-    print "Testing on abs_value:";
+    write "Testing on abs_value:\n";
     tc  (one_of_two (integer(), float())) abs_value_is_always_pos;
-    print "Testing on my_floor:";
+    write "Testing on my_floor:\n";
     tc  (float()) my_floor_test; 
-    print "Testing that my_count always return non-negative result:";
+    write "Testing that my_count always return non-negative result:\n";
     tc_n (tuple ([integer(), list(integer())])) my_count_returns_non_negative_int 1000;
-    print "Testing my_length:";
+    write "Testing my_length:\n";
     tc (list()) my_length_test;
-    print "Testing make_list:";
+    write "Testing make_list:\n";
     tc (pos_integer()) make_list_test 
     end
