@@ -102,11 +102,19 @@ let
     noOfArgs - number of arguments the property function takes.
     noOfTests - number of tests to be run.
     generator - the function that should be used to generate input values. *)
-    fun core_forall (generator, prop, 0, noOfTests) = (true, (), ())
-        |core_forall (generator, prop, i, noOfTests) =    
+    fun core_forall (generator, prop, 0, noOfTests, pre) = (true, (), ())
+        |core_forall (generator, prop, i, noOfTests, pre) =    
             let val args = generator noOfTests in
-            if prop args then core_forall (generator, prop, i-1, noOfTests+1)
-            else (false, args, noOfTests) end
+            case pre of 
+                () => 
+                    if prop args then core_forall (generator, prop, i-1, noOfTests+1, pre)
+                    else (false, args, noOfTests) 
+                | _ => 
+                    if (pre args) then 
+                        if (prop args) then (write "."; core_forall (generator, prop, i-1, noOfTests+1, pre))
+                        else (false, args, noOfTests)
+                    else (write "x"; core_forall (generator, prop, i, noOfTests+1, pre))
+            end
     
 
 (* Tests a property function - by default 100 times.
@@ -114,12 +122,12 @@ let
     generator - the generator function to generate inputs
     prop - the property function to test. *)
     fun tc generator prop = 
-        let val (succRes, args, successfulTests) = core_forall (generator, prop, 100, 0) in 
+        let val (succRes, args, successfulTests) = core_forall (generator, prop, 100, 0, ()) in 
             case succRes of
-            false => write "Failure at input: ";
+            false => write "\nFailure at input: ";
                         write (tc_toString args);
-                        write ("\nAfter running: " ^ (toString (successfulTests+1)) ^ " test(s)\n")
-            | true => write "OK: Passed after 100 tests!\n"
+                        write ("\nAfter running: " ^ (toString (successfulTests+1)) ^ " test(s)")
+            | true => write "\nOK: Passed after 100 tests!\n"
             end
 
 (* Tests a property function a given number of times.
@@ -127,13 +135,24 @@ let
     prop - the property function to test.
     noOfTests - how many tests should be run. *)
     fun tc_n generator prop noOfTests = 
-    let val (succRes, args, successfulTests) = core_forall (generator, prop, noOfTests, 0) in 
-            case succRes of
-            false => write "Failure at input: ";
-                        write args;
-                        write ("\nAfter running: " ^ (toString (successfulTests+1)) ^ " test(s)\n")
-            | true => write ("Success: Passed all " ^ (toString noOfTests) ^ " test(s).\n")
-            end
+        let val (succRes, args, successfulTests) = core_forall (generator, prop, noOfTests, 0, ()) in 
+                case succRes of
+                false => write "\nFailure at input: ";
+                            write args;
+                            write ("\nAfter running: " ^ (toString (successfulTests+1)) ^ " test(s)")
+                | true => write ("\nSuccess: Passed all " ^ (toString noOfTests) ^ " test(s).\n")
+                end
+    
+    fun tc_pre generator prop pre = 
+        let val (succRes, args, successfulTests) = core_forall (generator, prop, 100, 0, pre) in 
+                case succRes of
+                false => write "\nFailure at input: ";
+                            write args;
+                            write ("\nAfter running: " ^ (toString (successfulTests+1)) ^ " test(s)")
+                | true => write ("\nSuccess: Passed all 100 test(s).\n")
+                end
+
+
 (* --------------------------User convenience functions -------------------------*)
     fun integer() = int_gen(inf, inf)
         | integer (h, l) = int_gen(h, l)
@@ -212,24 +231,26 @@ let
     fun my_count_returns_non_negative_int (x, xs) = 
         (my_count x xs) >= 0
     
+    fun pre_pos x = 
+        x > 3
     in
 
-    write "Testing on bools commutative:\n";
+    write "\nTesting on bools commutative:";
     tc (tuple [boolean(), boolean()]) (fn(x,y) => bool_commutative x y);
-    write "Testing on numbers commutative:\n";
+    write "\nTesting on numbers commutative:";
     tc (tuple [integer(), integer()]) number_commutative;
-    write "Testing on list reverse:\n";
+    write "\nTesting on list reverse:";
     tc (list(integer())) list_reverse; 
-    write "Testing on int_gen interval:\n";
-    tc_n (pos_integer()) int_gen_stays_in_interval 1000;
-    write "Testing on abs_value:\n";
+    write "\nTesting on int_gen interval:";
+    tc_pre (pos_integer()) int_gen_stays_in_interval pre_pos;
+    write "\nTesting on abs_value:";
     tc  (one_of_two (integer(), float())) abs_value_is_always_pos;
-    write "Testing on my_floor:\n";
+    write "\nTesting on my_floor:";
     tc  (float()) my_floor_test; 
-    write "Testing that my_count always return non-negative result:\n";
+    write "\nTesting that my_count always return non-negative result:";
     tc_n (tuple ([integer(), list(integer())])) my_count_returns_non_negative_int 1000;
-    write "Testing my_length:\n";
+    write "\nTesting my_length:";
     tc (list()) my_length_test;
-    write "Testing make_list:\n";
+    write "\nTesting make_list:";
     tc (pos_integer()) make_list_test 
     end
