@@ -9,7 +9,6 @@ let
             | (y::ys) => "[" ^ (tc_toString y) ^ ", " ^ (tc_toString ys) ^ "]"
             | _ => toString x
 (* -----------------GENERATORS AND UTILS--------------------------*)
-    val inf = 1 / 0
 (* Generates a random boolean *) 
     fun bool_gen size = 
         let val rnd = random() 
@@ -22,8 +21,8 @@ let
     size - a non negative integer*)
     fun float_gen (low, high) size = 
         let val x = random() 
-            val lInf = low = inf
-            val hInf = high = inf
+            val lInf = low = 1/0 (* check for inf *)
+            val hInf = high = 1/0
         in 
         case (lInf, hInf) of 
             (true, true) => if (bool_gen size) then x*size else -x*size
@@ -56,16 +55,12 @@ let
 (* Generates a random generator *)
     fun generator_gen size = 
         let val rnd = random()
+            val inf = 1/0
             val res = if rnd <= 1/4 then (fn i => int_gen(inf, inf) i) else 
                       if rnd <= 2/4 then (fn i => bool_gen i) else 
                       if rnd <= 3/4 then (fn i => float_gen(inf, inf) i) else
                      (fn i => list_gen (int_gen(inf, inf)) i) in
         res end
-
-
-(* Copied from list lib, becuase it doesn't seem to be imported with the library?*)
-    fun nth (x::l) 1 = x
-      | nth (x::l) n = nth l (n - 1)
 
 (* Generates a random character - no spaces or sepcial characters,
      only letters (upper and lower case) and numbers. *)
@@ -107,8 +102,8 @@ let
             let val args = generator noOfTests in
             case pre of 
                 () => 
-                    if prop args then core_forall (generator, prop, i-1, noOfTests+1, pre)
-                    else (false, args, noOfTests) 
+                    if prop args then (write "."; core_forall (generator, prop, i-1, noOfTests+1, pre))
+                    else (write "!"; (false, args, noOfTests) )
                 | _ => 
                     if (pre args) then 
                         if (prop args) then (write "."; core_forall (generator, prop, i-1, noOfTests+1, pre))
@@ -128,27 +123,32 @@ let
                 | x => (x, ())
             val (succRes, args, successfulTests) = core_forall (generator, prop, 100, 0, pre) in 
             case succRes of
-            false => write "\nFailure at input: ";
-                        write (tc_toString args);
-                        write ("\nAfter running: " ^ (toString (successfulTests+1)) ^ " test(s)")
-            | true => write "\nOK: Passed after 100 tests!\n"
+                false => write "\nFailure at input: ";
+                        print (args);
+                        write ("After running: " ^ (toString (successfulTests+1)) ^ " test(s)\n")
+                | true => write "\nOK: Passed after 100 tests!\n"
             end
 
 (* Tests a property function a given number of times.
     generator - the generator function to generate inputs
     prop - the property function to test.
     noOfTests - how many tests should be run. *)
-    fun tc_n generator prop noOfTests = 
-        let val (succRes, args, successfulTests) = core_forall (generator, prop, noOfTests, 0, ()) in 
-                case succRes of
+    fun tc_n generator p noOfTests = 
+        let val (prop, pre) = 
+            case p of    
+                (x,y) => (x,y)
+                | x => (x, ())
+            val (succRes, args, successfulTests) = core_forall (generator, prop, noOfTests, 0, pre) in 
+            case succRes of
                 false => write "\nFailure at input: ";
-                            write args;
-                            write ("\nAfter running: " ^ (toString (successfulTests+1)) ^ " test(s)")
+                            print args;
+                            write ("After running: " ^ (toString (successfulTests+1)) ^ " test(s)\n")
                 | true => write ("\nSuccess: Passed all " ^ (toString noOfTests) ^ " test(s).\n")
-                end
+            end
 
 
 (* --------------------------User convenience functions -------------------------*)
+    val inf = 1 / 0
     fun integer() = int_gen(inf, inf)
         | integer (h, l) = int_gen(h, l)
     
@@ -227,25 +227,63 @@ let
         (my_count x xs) >= 0
     
     fun pre_pos x = 
-        x > 3
-    in
+        x >= 0
+(* ----------------------------For the userguide------------------------------- *)
+    fun filter_less ([], _) = []
+    | filter_less ((x::xs), p) = 
+        if x < p then append [x] (filter_less (xs, p)) else (filter_less (xs, p))
 
-    write "\nTesting on bools commutative:";
-    tc (tuple [boolean(), boolean()]) (fn(x,y) => bool_commutative x y);
-    write "\nTesting on numbers commutative:";
-    tc (tuple [integer(), integer()]) number_commutative;
-    write "\nTesting on list reverse:";
-    tc (list(integer())) list_reverse; 
-    write "\nTesting on int_gen interval:";
-    tc (pos_integer()) (int_gen_stays_in_interval, pre_pos);
-    write "\nTesting on abs_value:";
-    tc  (one_of_two (integer(), float())) abs_value_is_always_pos;
-    write "\nTesting on my_floor:";
-    tc  (float()) my_floor_test; 
-    write "\nTesting that my_count always return non-negative result:";
-    tc_n (tuple ([integer(), list(integer())])) my_count_returns_non_negative_int 1000;
-    write "\nTesting my_length:";
-    tc (list()) my_length_test;
-    write "\nTesting make_list:";
-    tc (pos_integer()) make_list_test 
-    end
+    fun filter_greater ([], _) = []
+    | filter_greater ((x::xs), p) = 
+        if x > p then append [x] (filter_greater (xs, p)) else (filter_greater (xs, p))
+
+
+    fun my_quicksort [] = []
+    | my_quicksort (x::xs) =
+        let val smaller = my_quicksort(filter_less(xs, x))
+            val greater = my_quicksort(filter_greater(xs, x)) in 
+        append (append smaller [x]) (greater) end
+    
+    fun ordered [] = true
+    | ordered (x::[]) = true 
+    | ordered (x::y::ys) = 
+        if x <= y then ordered (y::ys) else false
+
+    fun my_sort_is_ordered xs = 
+        ordered (my_quicksort xs) 
+    
+    fun my_sort_keep_length xs = 
+        length xs = length (my_quicksort(xs))
+    
+    fun pre_list_size_greater_than_one xs = 
+        if (length xs) <= 1 then false else true
+    
+    fun no_duplicates[] = true 
+    | no_duplicates (x::xs) = if (elem x xs) then false else no_duplicates xs
+
+    fun append_length_increase (xs, x) = 
+        (length (append xs [x])) = ((length xs) + 1)
+    
+in
+(* tc (tuple[list(integer()), integer()]) (append_length_increase)
+ *)
+tc (list(integer())) my_sort_is_ordered
+(* write "\nTesting on bools commutative:";
+tc (tuple [boolean(), boolean()]) (fn(x,y) => bool_commutative x y);
+write "\nTesting on numbers commutative:";¢¢
+tc (tuple [integer(), integer()]) number_commutative;
+write "\nTesting on list reverse:";
+tc (list(integer())) list_reverse; 
+write "\nTesting on int_gen interval:";
+tc (integer()) (int_gen_stays_in_interval, pre_pos);
+write "\nTesting on abs_value:";
+tc  (one_of_two (integer(), float())) abs_value_is_always_pos;
+write "\nTesting on my_floor:";
+tc  (float()) my_floor_test; 
+write "\nTesting that my_count always return non-negative result:";
+tc_n (tuple ([integer(), list(integer())])) my_count_returns_non_negative_int 1000;
+write "\nTesting my_length:";
+tc (list()) my_length_test;
+write "\nTesting make_list:";
+tc (pos_integer()) make_list_test  *)
+end

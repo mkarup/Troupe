@@ -69,5 +69,6 @@ in
     , ("length",  length)
     , ("append",  append)
     , ("partition", partition) 
+    , ("nth", nth)
     ]
 end
