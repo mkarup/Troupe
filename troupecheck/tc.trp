@@ -99,14 +99,16 @@ cant_satisfy ->
     Error: No valid test could be generated.
  *)
     fun report_error error_reason = 
+        write "\u001B[31m \nError: "; (* Changing the print color to red *)
         case error_reason of 
-            ("cant_generate", tries) => write "\nError: Couldn't produce an instance that satisfies all strict constraints after "
+            ("cant_generate", tries) => write "Couldn't produce an instance that satisfies all strict constraints after "
                                             ^ (toString tries) ^ " tries.\n"
-            | ("non_boolean_result", _) => write "\nError: The property code returned a non-boolean result.\n"
-            | ("rejected", _) => write "\nError: The input doesn't correspond to this property: It failed to match precondition check.\n"
-            | ("too_many_instances", _) => write "\nError: The input doesn't correspond to this property: It's too long.\n"
-            | ("type_mismatch", _) => write "\nError: The variables' and types' structures don't match.\n"
-            | ("record_mismatch", _) => write "\nError: the number of names provided for record generation, does not match the number of types provided.\n";
+            | ("non_boolean_result", _) => write "The property code returned a non-boolean result.\n"
+            | ("rejected", _) => write "The input doesn't correspond to this property: It failed to match precondition check.\n"
+            | ("too_many_instances", _) => write "The input doesn't correspond to this property: It's too long.\n"
+            | ("type_mismatch", _) => write "The variables' and types' structures don't match.\n"
+            | ("record_mismatch", _) => write "the number of names provided for record generation, does not match the number of types provided.\n";
+        write "\u001B[0m"; (* Changing the color back *)
         exit (authority, 0)
 
 (* ----------------------CORE FUNCTIONALITY--------------------------*)
@@ -206,9 +208,9 @@ cant_satisfy ->
             ([],[]) => (fn i => {})
             | ((y::ys), (v::vs)) => 
                 let fun record_aux (f, [], []) = f 
-                | record_aux (f, (x::xs), (z::zs)) = record_aux ((fn i => {(f i) with x = (z i)}), xs, zs)
+                | record_aux (f, (x::xs), (z::zs)) = record_aux ((fn i => recordExtend((f i), x, (z i))), xs, zs)
                 in 
-                (record_aux ((fn i => {y = (v i)}), ys, vs)) end end
+                (record_aux ((fn i => recordExtend({}, y, (v i))), ys, vs)) end end
     
 (* --------------------------functions to test on-------------------------------- *) 
     fun my_reverse xs = 
@@ -256,7 +258,7 @@ cant_satisfy ->
         (my_count x xs) >= 0
     
     fun rec_test (rec, i) = 
-        {x = rec.x, y = rec.y, z = i} = {rec with z = i}
+        {theInteger = rec.theInteger, theString = rec.theString, z = i} = {rec with z = i}
 
     fun pre_pos x = 
         x >= 0
@@ -297,8 +299,7 @@ cant_satisfy ->
         (length (x::xs)) = ((length xs) + 1)
     
 in
-
-tc (tuple[(record ["y"][integer(), string()]), integer()]) rec_test
+tc (tuple[(record ["theInteger", "theString"][integer(), string()]), integer()]) rec_test
 (* tc (tuple[list(integer()), integer()]) cons_length_increase;
 tc (list(integer())) my_sort_is_ordered;
 tc (list(integer())) my_sort_keep_length;
