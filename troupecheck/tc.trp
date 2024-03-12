@@ -100,58 +100,62 @@ cant_satisfy ->
  *)
     fun report_error error_reason = 
         write "\u001B[31m \nError: "; (* Changing the print color to red *)
-        case error_reason of 
-            ("cant_generate", tries) => write "Couldn't produce an instance that satisfies all strict constraints after "
+        let val err_string = case error_reason of 
+            ("cant_generate", tries) => "Couldn't produce an instance that satisfies all strict constraints after "
                                             ^ (toString tries) ^ " tries.\n"
-            | ("non_boolean_result", _) => write "The property code returned a non-boolean result.\n"
-            | ("rejected", _) => write "The input doesn't correspond to this property: It failed to match precondition check.\n"
-            | ("too_many_instances", _) => write "The input doesn't correspond to this property: It's too long.\n"
-            | ("type_mismatch", _) => write "The variables' and types' structures don't match.\n"
-            | ("record_mismatch", _) => write "the number of names provided for record generation, does not match the number of types provided.\n";
-        write "\u001B[0m"; (* Changing the color back *)
-        exit (authority, 0)
-
+            | ("cant_satisfy", _) => "No valid test could be generated.\n"
+            | ("non_boolean_result", _) => "The property or precondition code returned a non-boolean result.\n"
+            | ("rejected", _) => "The input doesn't correspond to this property: It failed to match precondition check.\n"
+            | ("too_many_instances", _) => "The input doesn't correspond to this property: It's too long.\n"
+            | ("type_mismatch", _) => "The variables' and types' structures don't match.\n"
+            | ("record_mismatch", _) => "the number of names provided for record generation, does not match the number of types provided.\n"
+        in
+        write (err_string ^ "\u001B[0m"); (* Changing the color back *)
+        exit (authority, 0) end
+    
+(* Checks that a function returns a boolean - reports an error if not. *)
+    fun bool_function_check gen p = 
+        let val b = p (gen 1) in 
+        case b of 
+            true => p
+            |false => p
+            | _ => report_error ("non_boolean_result", 0) end
 (* ----------------------CORE FUNCTIONALITY--------------------------*)
 (* Runs however many tests specified on a property, while always generating new inputs. 
-    Drops further execution if a Failure is found. 
-    prop - the property function to test.
-    noOfTests - number of tests to be run.
-    generator - the function that should be used to generate input values. *)
-    fun core_forall (generator, prop, 0, noOfTests, pre) = {success = true, cEx = (), remTests = ()}
-        |core_forall (generator, prop, i, noOfTests, pre) =    
-            let val args = generator noOfTests in
+    Drops further execution if a Failure is found.  *)
+    fun core_forall (generator, prop, 0, size, pre) = {success = true, cEx = (), remTests = 0}
+        |core_forall (generator, prop, i, size, pre) =    
+            let val args = generator size 
+                val triesCap = i*5 in
             case pre of 
                 () => 
-                    if prop args then (write "."; core_forall (generator, prop, i-1, noOfTests+1, pre))
+                    if prop args then (write "."; core_forall (generator, prop, i-1, size+1, pre))
                     else (write "!"; {success = false, cEx = args, remTests = i})
                 | _ => 
                     if (pre args) then 
-                        if (prop args) then (write "."; core_forall (generator, prop, i-1, noOfTests+1, pre))
+                        if (prop args) then (write "."; core_forall (generator, prop, i-1, size+1, pre))
                         else {success = false, cEx = args, remTests = i}
-                    else (write "x"; core_forall (generator, prop, i, noOfTests+1, pre))
+                    else 
+                    (write "x"; core_forall (generator, prop, i, size+1, pre))
             end
     
 
-(* Tests a property function - by default 100 times. 
-    generator - the generator function to generate inputs
-    p - the property function to test. *)
+(* Tests a property function 100 times. *)
     fun tc generator p = 
-        let val (prop, pre) = 
-            case p of    
-                (x,y) => (x,y)
-                | x => (x, ())
+        let val return_bool_check = bool_function_check generator
+            val (prop, pre) = 
+                case p of    
+                    (x,y) => ((return_bool_check x),(return_bool_check y)) (* Maybe need to do check in core for all for each run - see no_duplicates *)
+                    | x => ((return_bool_check x), ())
             val res = core_forall (generator, prop, 100, 0, pre) in 
             case res.success of
                 false => write "\nFailure at input: ";
                         print (res.cEx);
                         write ("After running: " ^ (toString (100 - res.remTests + 1)) ^ " test(s)\n")
-                | true => write "\nOK: Passed after 100 tests!\n"
+                | true => write ("\nOK: Passed after " ^ (toString (100 - res.remTests)) ^ " test(s)!\n")
         end
 
-(* Tests a property function a given number of times.
-    generator - the generator function to generate inputs
-    prop - the property function to test.
-    noOfTests - how many tests should be run. *)
+(* Tests a property function a given number of times. *)
     fun tc_n generator p noOfTests = 
         let val (prop, pre) = 
             case p of    
@@ -228,7 +232,20 @@ cant_satisfy ->
             let val z = 
                 if y = x then 1 else 0 
             in 
-            z + my_count y xs end
+            z + my_count y xs end 
+    
+    fun my_floor i =
+        if i >=0 then i - (i mod 1)
+        else i - (i mod 1) - 1
+    
+    fun my_ceil_1 i =
+        if i > 0 then i + (1 - (i mod 1))
+        else i + (1 - (i mod 1)) - 1
+    
+    fun my_ceil_2 i =
+        if i > 0 then (my_floor i) + 1
+        else if i = 0 then 0
+        else (my_floor i) + 1
 (* --------------------------Propterties to run-------------------------*)
     fun bool_commutative x y = 
         (x andalso y) = (y andalso x)
@@ -262,6 +279,18 @@ cant_satisfy ->
 
     fun pre_pos x = 
         x >= 0
+
+    fun my_floor_test i =
+        my_floor i = floor i
+
+    fun my_ceil_1_test i =
+        my_ceil_1 i = ceil i
+    
+    fun my_ceil_2_test i =
+        my_ceil_2 i = ceil i
+    
+    fun both_ceil_test i =
+        my_ceil_1 i = my_ceil_2 i
 (* ----------------------------For the userguide------------------------------- *)
     fun filter_less ([], _) = []
     | filter_less ((x::xs), p) = 
@@ -299,7 +328,9 @@ cant_satisfy ->
         (length (x::xs)) = ((length xs) + 1)
     
 in
-tc (tuple[(record ["theInteger", "theString"][integer(), string()]), integer()]) rec_test
+
+tc (list(integer())) (my_sort_keep_length, no_duplicates)
+(* tc (tuple[(record ["theInteger", "theString"][integer(), string()]), integer()]) rec_test *)
 (* tc (tuple[list(integer()), integer()]) cons_length_increase;
 tc (list(integer())) my_sort_is_ordered;
 tc (list(integer())) my_sort_keep_length;
@@ -321,5 +352,11 @@ tc_n (tuple ([integer(), list(integer())])) my_count_returns_non_negative_int 10
 write "\nTesting my_length:";
 tc (list()) my_length_test;
 write "\nTesting make_list:";
-tc (pos_integer()) make_list_test  *)
+tc (pos_integer()) make_list_test;
+print "Testing on my_ceil_1:";
+tc  (fn i => generate_float i) my_ceil_1_test;
+print "Testing on my_ceil_2:";
+tc  (fn i => generate_float i) my_ceil_2_test;
+print "Testing on both ceil functions:";
+tc  (fn i => generate_float i) both_ceil_test *)
 end
