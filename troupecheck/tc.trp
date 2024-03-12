@@ -95,19 +95,16 @@ let
 arity_limit ->
 Error: Couldn't produce a function of the desired arity, please
     recompile PropEr with an increased value for ?MAX_ARITY.
-cant_satisfy ->
-    Error: No valid test could be generated.
  *)
     fun report_error error_reason = 
         write "\u001B[31m \nError: "; (* Changing the print color to red *)
         let val err_string = case error_reason of 
             ("cant_generate", tries) => "Couldn't produce an instance that satisfies all strict constraints after "
                                             ^ (toString tries) ^ " tries.\n"
-            | ("cant_satisfy", _) => "No valid test could be generated.\n"
+            | ("cant_satisfy", tries) => "No valid test could be generated after " ^ (toString tries) ^ " tries.\n"
             | ("non_boolean_result", _) => "The property or precondition code returned a non-boolean result.\n"
-            | ("rejected", _) => "The input doesn't correspond to this property: It failed to match precondition check.\n"
-            | ("too_many_instances", _) => "The input doesn't correspond to this property: It's too long.\n"
-            | ("type_mismatch", _) => "The variables' and types' structures don't match.\n"
+            | ("type_mismatch", _) => "The types' structure doesn't match the property.\n"
+            | ("illegal_gen_def", _ ) => "Generator is defined wrong - use tuple() or record() to combine generators.\n"
             | ("record_mismatch", _) => "the number of names provided for record generation, does not match the number of types provided.\n"
         in
         write (err_string ^ "\u001B[0m"); (* Changing the color back *)
@@ -120,54 +117,60 @@ cant_satisfy ->
             true => p
             |false => p
             | _ => report_error ("non_boolean_result", 0) end
+
+    fun generator_check gen = 
+        case gen of 
+            (x) => print "test1"
+            | _ => print "test3"
 (* ----------------------CORE FUNCTIONALITY--------------------------*)
 (* Runs however many tests specified on a property, while always generating new inputs. 
     Drops further execution if a Failure is found.  *)
-    fun core_forall (generator, prop, 0, size, pre) = {success = true, cEx = (), remTests = 0}
-        |core_forall (generator, prop, i, size, pre) =    
-            let val args = generator size 
-                val triesCap = i*5 in
+    fun core_forall (generator, prop, 0, size, pre, cap) = {success = true, cEx = (), remTests = 0}
+        |core_forall (generator, prop, i, size, pre, cap) =    
+            let val args = generator size in
             case pre of 
                 () => 
-                    if prop args then (write "."; core_forall (generator, prop, i-1, size+1, pre))
+                    if prop args then (write "."; core_forall (generator, prop, i-1, size+1, pre, cap))
                     else (write "!"; {success = false, cEx = args, remTests = i})
                 | _ => 
                     if (pre args) then 
-                        if (prop args) then (write "."; core_forall (generator, prop, i-1, size+1, pre))
+                        if (prop args) then (write "."; core_forall (generator, prop, i-1, size+1, pre, cap))
                         else {success = false, cEx = args, remTests = i}
                     else 
-                    (write "x"; core_forall (generator, prop, i, size+1, pre))
+                    (write "x"; 
+                    if (size = cap) andalso (i*5 = cap) then report_error ("cant_satisfy", size)
+                    else if size = cap then {success = true, cEx = (), remTests = i}
+                    else core_forall (generator, prop, i, size+1, pre, cap))
             end
     
-
-(* Tests a property function 100 times. *)
-    fun tc generator p = 
+    (* Tests a property function a given number of times. *)
+    fun tc_n generator p noOfTests = 
         let val return_bool_check = bool_function_check generator
             val (prop, pre) = 
                 case p of    
                     (x,y) => ((return_bool_check x),(return_bool_check y)) (* Maybe need to do check in core for all for each run - see no_duplicates *)
                     | x => ((return_bool_check x), ())
-            val res = core_forall (generator, prop, 100, 0, pre) in 
+            val res = core_forall (generator, prop, noOfTests, 0, pre, (noOfTests*5)) in 
+            case res.success of
+                false => write "\nFailure at input: ";
+                            print (res.cEx);
+                            write ("After running: " ^ (toString (noOfTests - res.remTests + 1)) ^ " test(s)\n")
+                | true => write ("\u001B[1m \u001B[32m \nSuccess: \u001B[0mPassed all " ^ (toString noOfTests) ^ " test(s).\n")
+        end
+(* Tests a property function 100 times. *)
+    fun tc generator p = tc_n generator p 100
+        (* let val return_bool_check = bool_function_check generator
+            val (prop, pre) = 
+                case p of    
+                    (x,y) => ((return_bool_check x),(return_bool_check y)) (* Maybe need to do check in core for all for each run - see no_duplicates *)
+                    | x => ((return_bool_check x), ())
+            val res = core_forall (generator, prop, 100, 0, pre, (100*5)) in 
             case res.success of
                 false => write "\nFailure at input: ";
                         print (res.cEx);
                         write ("After running: " ^ (toString (100 - res.remTests + 1)) ^ " test(s)\n")
                 | true => write ("\nOK: Passed after " ^ (toString (100 - res.remTests)) ^ " test(s)!\n")
-        end
-
-(* Tests a property function a given number of times. *)
-    fun tc_n generator p noOfTests = 
-        let val (prop, pre) = 
-            case p of    
-                (x,y) => (x,y)
-                | x => (x, ())
-            val res = core_forall (generator, prop, noOfTests, 0, pre) in 
-            case res.success of
-                false => write "\nFailure at input: ";
-                            print (res.cEx);
-                            write ("After running: " ^ (toString (noOfTests - res.remTests + 1)) ^ " test(s)\n")
-                | true => write ("\nSuccess: Passed all " ^ (toString noOfTests) ^ " test(s).\n")
-            end
+        end *)
 
 (* --------------------------User convenience functions -------------------------*)
     val inf = 1 / 0
@@ -176,7 +179,7 @@ cant_satisfy ->
     
     fun pos_integer() = int_gen(0, inf)
 
-    fun neg_integer() = int_gen(inf, 0)
+    fun neg_integer() = int_gen(inf, -1)
 
     fun float() = float_gen(inf, inf)
         | float(h, l) = float_gen(h, l)
@@ -329,9 +332,8 @@ cant_satisfy ->
     
 in
 
-tc (list(integer())) (my_sort_keep_length, no_duplicates)
-(* tc (tuple[(record ["theInteger", "theString"][integer(), string()]), integer()]) rec_test *)
-(* tc (tuple[list(integer()), integer()]) cons_length_increase;
+tc (tuple[(record ["theInteger", "theString"][integer(), string()]), integer()]) rec_test;
+tc (tuple[list(integer()), integer()]) cons_length_increase;
 tc (list(integer())) my_sort_is_ordered;
 tc (list(integer())) my_sort_keep_length;
 tc (list(integer())) (my_sort_keep_length, no_duplicates);
@@ -354,9 +356,9 @@ tc (list()) my_length_test;
 write "\nTesting make_list:";
 tc (pos_integer()) make_list_test;
 print "Testing on my_ceil_1:";
-tc  (fn i => generate_float i) my_ceil_1_test;
+tc  (fn i => float() i) my_ceil_1_test;
 print "Testing on my_ceil_2:";
-tc  (fn i => generate_float i) my_ceil_2_test;
+tc  (fn i => float() i) my_ceil_2_test;
 print "Testing on both ceil functions:";
-tc  (fn i => generate_float i) both_ceil_test *)
+tc  (fn i => float() i) both_ceil_test
 end
