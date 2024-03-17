@@ -145,11 +145,18 @@ Error: Couldn't produce a function of the desired arity, please
 
 
 (* ----------------------CORE FUNCTIONALITY--------------------------*)
+    
     fun apply_args p l =
         case l of 
-            [] => p
-            | (x::xs) => apply_args (p x) xs
-    
+            [] => if (p() <> true) andalso (p() <> false) then report_error ("non_boolean_result", 0) else p() (* this case is only reached if there are no generators to beign with*)
+            | [x] => 
+                if (p = true) orelse (p = false) then report_error ("type_mismatch", 0)  
+                else if ((p x) <> true) andalso ((p x) <> false) then report_error ("non_boolean_result", 0)
+                else(p x) 
+            | (x::xs) => 
+                if (p = true) orelse (p = false) then report_error ("type_mismatch", 0)
+                else apply_args (p x) xs
+
     fun args_from_gen gens = 
         let fun args_aux [] acc = acc 
             | args_aux (x::xs) acc = args_aux xs (fn i => append (acc i) [(x i)]) in 
@@ -162,15 +169,20 @@ Error: Couldn't produce a function of the desired arity, please
             true => p
             |false => p
             | _ => report_error ("non_boolean_result", 0) end
+    
+    fun prop_takes_no_args p = 
+        print p; 
+        if ((p()) = true) orelse ((p()) = false) then p()
+        else p
 
 (* Runs however many tests specified on a property, while always generating new inputs. 
     Drops further execution if a Failure is found.  *)
     fun core_forall (generator, prop, 0, size, pre, cap) = {success = true, cEx = (), remTests = 0}
-        |core_forall (generator, prop, i, size, pre, cap) =   
+        |core_forall (generator, prop, i, size, pre, cap) =  
             let val args = (args_from_gen generator) size in
             case pre of 
                 () => 
-                    if (apply_args prop args ) then (write "."; core_forall (generator, prop, i-1, size+1, pre, cap))
+                    if (apply_args prop args) then (write "."; core_forall (generator, prop, i-1, size+1, pre, cap))
                     else (write "!"; {success = false, cEx = args, remTests = i})
                 | _ => 
                     if (apply_args pre args) then 
@@ -188,8 +200,8 @@ Error: Couldn't produce a function of the desired arity, please
         let val return_bool_check = bool_function_check generator
             val (prop, pre) = 
                 case p of    
-                    (x,y) => ((return_bool_check x),(return_bool_check y)) (* Maybe need to do check in core for all for each run - see no_duplicates *)
-                    | x => ((return_bool_check x), ())
+                    (x,y) => (x,y)
+                    | x => (x, ())
             val res = core_forall (generator, prop, noOfTests, 0, pre, (noOfTests*5)) in 
             case res.success of
                 false => write "\nFailure at input: ";
@@ -343,8 +355,11 @@ Error: Couldn't produce a function of the desired arity, please
 
     fun cons_length_increase xs x = 
         (length (x::xs)) = ((length xs) + 1)
+
+    fun no_args() = true
 in
 
+tc [] no_args;
 tc [integer(), integer(), integer(), integer()] tup_test;
 tc [(record ["theInteger", "theString"][integer(), string()]), integer()] rec_test;
 tc [list(integer()), integer()] cons_length_increase;
