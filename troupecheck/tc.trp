@@ -35,15 +35,6 @@ Error: Couldn't produce a function of the desired arity, please
             true => p
             |false => p
             | _ => report_error ("non_boolean_result", 0) end
-
-    fun tuple_size_count (x, xs) acc = print("tesgs"); tuple_size_count xs (acc+1)
-    | tuple_size_count(_) = acc+1
-    | tuple_size_count () acc =  acc
-
-    fun generator_check gen = 
-        case gen of 
-            (x, xs) => report_error ("illegal_gen_def", 0)
-            | _ => ()
 (* -----------------GENERATORS AND UTILS--------------------------*)
 (* Generates a random boolean *) 
     fun bool_gen size = 
@@ -100,6 +91,8 @@ Error: Couldn't produce a function of the desired arity, please
             | fold f acc i = fold f (acc ^ f()) (i-1) in 
         fold char_gen "" x end
 
+(* Generates a tuple *)
+(* can only generate tuples of two for now... if list is longer will nest them *)
     fun tuple_gen ts = 
         case ts of 
             [] => (fn i => ())
@@ -108,7 +101,7 @@ Error: Couldn't produce a function of the desired arity, please
                 | tuple_aux (f, (x::xs)) = tuple_aux ((fn i => (f i, x i)), xs)
                 in 
                 (tuple_aux ((fn i => y i), ys)) end
-    
+(* Generates a record with fields corresponding to first list of strings, and values corresponding to second list *)    
     fun rec_gen ns ts = 
         let val noOfElems = length ts 
         in if (length ns) <> noOfElems then 
@@ -145,7 +138,8 @@ Error: Couldn't produce a function of the desired arity, please
 
 
 (* ----------------------CORE FUNCTIONALITY--------------------------*)
-    
+(* applies the list of arguments to the property - one by one - reporting errors along the way *)
+(* TODO: handle when arguments are passed to a property that does not take arguments *)
     fun apply_args p l =
         case l of 
             [] => if (p() <> true) andalso (p() <> false) then report_error ("non_boolean_result", 0) else p() (* this case is only reached if there are no generators to beign with*)
@@ -157,6 +151,7 @@ Error: Couldn't produce a function of the desired arity, please
                 if (p = true) orelse (p = false) then report_error ("type_mismatch", 0)
                 else apply_args (p x) xs
 
+(* takes a list of generator, and returns a function that when given an integer returns a list of elements created by the generators *)
     fun args_from_gen gens = 
         let fun args_aux [] acc = acc 
             | args_aux (x::xs) acc = args_aux xs (fn i => append (acc i) [(x i)]) in 
@@ -169,11 +164,6 @@ Error: Couldn't produce a function of the desired arity, please
             true => p
             |false => p
             | _ => report_error ("non_boolean_result", 0) end
-    
-    fun prop_takes_no_args p = 
-        print p; 
-        if ((p()) = true) orelse ((p()) = false) then p()
-        else p
 
 (* Runs however many tests specified on a property, while always generating new inputs. 
     Drops further execution if a Failure is found.  *)
