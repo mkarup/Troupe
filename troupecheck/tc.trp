@@ -17,7 +17,7 @@ Error: Couldn't produce a function of the desired arity, please
     fun report_error error_reason = 
         write "\u001B[31m \nError: "; (* Changing the print color to red *)
         let val err_string = case error_reason of 
-            ("cant_generate", tries) => "Couldn't produce an insta ^nce that satisfies all strict constraints after "
+            ("cant_generate", tries) => "Couldn't produce an instance that satisfies all strict constraints after "
                                             ^ (toString tries) ^ " tries.\n"
             | ("cant_satisfy", tries) => "No valid test could be generated after " ^ (toString tries) ^ " tries.\n"
             | ("non_boolean_result", _) => "The property or precondition code returned a non-boolean result.\n"
@@ -28,13 +28,6 @@ Error: Couldn't produce a function of the desired arity, please
         write (err_string ^ "\u001B[0m"); (* Changing the color back *)
         exit (authority, 0) end
     
-(* Checks that a function returns a boolean - reports an error if not. *)
-    fun bool_function_check gen p = 
-        let val b = p (gen 1) in 
-        case b of 
-            true => p
-            |false => p
-            | _ => report_error ("non_boolean_result", 0) end
 (* -----------------GENERATORS AND UTILS--------------------------*)
 (* Generates a random boolean *) 
     fun bool_gen size = 
@@ -92,15 +85,22 @@ Error: Couldn't produce a function of the desired arity, please
         fold char_gen "" x end
 
 (* Generates a tuple *)
-(* can only generate tuples of two for now... if list is longer will nest them *)
-    fun tuple_gen ts = 
+(* Hardcoded for tuple of up to 10 elements *)
+    fun tuple_gen ts i = 
         case ts of 
-            [] => (fn i => ())
-            | (y::ys) => 
-                let fun tuple_aux (f, []) = f 
-                | tuple_aux (f, (x::xs)) = tuple_aux ((fn i => (f i, x i)), xs)
-                in 
-                (tuple_aux ((fn i => y i), ys)) end
+            [] => (0)
+            |[x] => (x) 
+            |[x1,x2] => (x1,x2)
+            |[x1,x2,x3] => (x1,x2,x3)
+            |[x1,x2,x3,x4] => (x1,x2,x3,x4)
+            |[x1,x2,x3,x4,x5] => (x1,x2,x3,x4,x5)
+            |[x1,x2,x3,x4,x5,x6] => (x1,x2,x3,x4,x5,x6)
+            |[x1,x2,x3,x4,x5,x6,x7] => (x1,x2,x3,x4,x5,x6,x7)
+            |[x1,x2,x3,x4,x5,x6,x7,x8] => (x1,x2,x3,x4,x5,x6,x7,x8)
+            |[x1,x2,x3,x4,x5,x6,x7,x8,x9] => (x1,x2,x3,x4,x5,x6,x7,x8,x9)
+            |[x1,x2,x3,x4,x5,x6,x7,x8,x9,x10] => (x1,x2,x3,x4,x5,x6,x7,x8,x9,x10)
+            |_ => (2, 3, 4, 5)
+
 (* Generates a record with fields corresponding to first list of strings, and values corresponding to second list *)    
     fun rec_gen ns ts = 
         let val noOfElems = length ts 
@@ -138,38 +138,26 @@ Error: Couldn't produce a function of the desired arity, please
 
 
 (* ----------------------CORE FUNCTIONALITY--------------------------*)
+    fun boolean_check x = 
+        if (x <> true) andalso (x <> false) then report_error ("non_boolean_result", 0) else ()
+
+    fun function_not_done_check p = 
+        if (p = true) orelse (p = false) then report_error ("type_mismatch", 0) else ()
 (* applies the list of arguments to the property - one by one - reporting errors along the way *)
 (* TODO: handle when arguments are passed to a property that does not take arguments *)
     fun apply_args p l =
         case l of 
-            [] => if (p() <> true) andalso (p() <> false) then report_error ("non_boolean_result", 0) else p() (* this case is only reached if there are no generators to beign with*)
-            | [x] => 
-                if (p = true) orelse (p = false) then report_error ("type_mismatch", 0)  
-                else if ((p x) <> true) andalso ((p x) <> false) then report_error ("non_boolean_result", 0)
-                else(p x) 
+            [] => boolean_check (p()); p() (* this case is only reached if there are no generators to beign with*)
             | (x::xs) => 
-                if (p = true) orelse (p = false) then report_error ("type_mismatch", 0)
-                else apply_args (p x) xs
-
-(* takes a list of generator, and returns a function that when given an integer returns a list of elements created by the generators *)
-    fun args_from_gen gens = 
-        let fun args_aux [] acc = acc 
-            | args_aux (x::xs) acc = args_aux xs (fn i => append (acc i) [(x i)]) in 
-        args_aux gens (fn i => []) end
-    
-(* Checks that a function returns a boolean - reports an error if not. *)
-    fun bool_function_check gen p = 
-        let val b = apply_args p (args_from_gen gen 1) in 
-        case b of 
-            true => p
-            |false => p
-            | _ => report_error ("non_boolean_result", 0) end
+                let val res = foldl (fn (x,y) => function_not_done_check y; y x) p l in
+                boolean_check res;
+                res end
 
 (* Runs however many tests specified on a property, while always generating new inputs. 
     Drops further execution if a Failure is found.  *)
     fun core_forall (generator, prop, 0, size, pre, cap) = {success = true, cEx = (), remTests = 0}
         |core_forall (generator, prop, i, size, pre, cap) =  
-            let val args = (args_from_gen generator) size in
+            let val args = map (fn x => x size) generator in
             case pre of 
                 () => 
                     if (apply_args prop args) then (write "."; core_forall (generator, prop, i-1, size+1, pre, cap))
@@ -186,9 +174,9 @@ Error: Couldn't produce a function of the desired arity, please
             end
     
     (* Tests a property function a given number of times. *)
+    (* test tc itself - maybe by returning result *)
     fun tc_n generator p noOfTests = 
-        let val return_bool_check = bool_function_check generator
-            val (prop, pre) = 
+        let val (prop, pre) = 
                 case p of    
                     (x,y) => (x,y)
                     | x => (x, ())
@@ -196,8 +184,8 @@ Error: Couldn't produce a function of the desired arity, please
             case res.success of
                 false => write "\nFailure at input: ";
                             print (res.cEx);
-                            write ("After running: " ^ (toString (noOfTests - res.remTests + 1)) ^ " test(s)\n")
-                | true => write ("\u001B[1m \u001B[32m \nSuccess: \u001B[0mPassed all " ^ (toString noOfTests) ^ " test(s).\n")
+                            write ("After running: " ^ (toString (noOfTests - res.remTests + 1)) ^ " test(s)\n"); false
+                | true => write ("\u001B[1m \u001B[32m \nSuccess: \u001B[0mPassed all " ^ (toString noOfTests) ^ " test(s).\n"); true
         end
 (* Tests a property function 100 times. *)
     fun tc generator p = tc_n generator p 100
@@ -286,7 +274,7 @@ Error: Couldn't produce a function of the desired arity, please
         my_length xs = length xs
     
     fun make_list_test i = 
-        length (make_list ((fn ()=> (generator_gen i) (int_gen(0,inf) i)), i)) = i
+        length (make_list ((fn () => (generator_gen i) (int_gen(0,inf) i)), i)) = i
     
     fun my_count_returns_non_negative_int x xs = 
         (my_count x xs) >= 0
@@ -347,15 +335,23 @@ Error: Couldn't produce a function of the desired arity, please
         (length (x::xs)) = ((length xs) + 1)
 
     fun no_args() = true
+(* ----------------------------For tc^2---------------------------------------- *)
+    fun tc_sort_length_always_fails () =    
+        tc [list(integer())] my_sort_keep_length = false
 in
 
-tc [] no_args;
-tc [integer(), integer(), integer(), integer()] tup_test;
+(* tc^2 tests *)
+tc [] tc_sort_length_always_fails
+
+(* (* User guide tests *)
 tc [(record ["theInteger", "theString"][integer(), string()]), integer()] rec_test;
 tc [list(integer()), integer()] cons_length_increase;
 tc [list(integer())] my_sort_is_ordered;
 tc [list(integer())] my_sort_keep_length;
 tc [list(integer())] (my_sort_keep_length, no_duplicates);
+(* General functionality tests *)
+tc [] no_args;
+tc [integer(), integer(), integer(), integer()] tup_test;
 write "\nTesting on bools commutative:";
 tc [boolean(), boolean()] bool_commutative;
 write "\nTesting on numbers commutative:";
@@ -374,10 +370,10 @@ write "\nTesting my_length:";
 tc [list()] my_length_test;
 write "\nTesting make_list:";
 tc [pos_integer()] make_list_test;
-print "Testing on my_ceil_1:";
+write "Testing on my_ceil_1:";
 tc  [float()] my_ceil_1_test;
-print "Testing on my_ceil_2:";
+write "Testing on my_ceil_2:";
 tc  [float()] my_ceil_2_test;
-print "Testing on both ceil functions:";
-tc  [float()] both_ceil_test
+write "Testing on both ceil functions:";
+tc  [float()] both_ceil_test *)
 end
