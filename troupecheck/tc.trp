@@ -338,10 +338,13 @@ Error: Couldn't produce a function of the desired arity, please
 (* ----------------------------For tc^2---------------------------------------- *)
     fun tc_sort_length_always_fails () =    
         tc [list(integer())] my_sort_keep_length = false
+    
+    fun tc_sort_ordered_always_true () =    
+        tc [list(integer())] my_sort_is_ordered = true
 in
 
 (* tc^2 tests *)
-tc [] tc_sort_length_always_fails
+tc [] tc_sort_ordered_always_true
 
 (* (* User guide tests *)
 tc [(record ["theInteger", "theString"][integer(), string()]), integer()] rec_test;
