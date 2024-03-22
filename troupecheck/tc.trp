@@ -3,11 +3,11 @@ let
 (* ----------------USED FOR PRINTING TO CONSOLE-------------------- *)
     val out = getStdout authority
     fun write x = fwrite (out, x)
-    fun tc_toString x =
-        case x of 
-            (y, ys) => "(" ^ (tc_toString y) ^ ", " ^ (tc_toString ys) ^ ")"
-            | (y::ys) => "[" ^ (tc_toString y) ^ ", " ^ (tc_toString ys) ^ "]"
-            | _ => toString x
+    (* arguments are always in a list - for easier readability these are removed when converting arguments to string *)
+    fun args_toString args = 
+        let fun aux_toString acc (x0::x1::xs) = aux_toString (acc ^ (toString x0) ^ ", ") (x1::xs)
+            | aux_toString acc (x::xs) = acc ^ (toString x) in 
+        aux_toString "" args end
 (* -------------------------------Error Handling-------------------------------- *)
 (* 
 arity_limit ->
@@ -139,10 +139,11 @@ Error: Couldn't produce a function of the desired arity, please
 
 (* ----------------------CORE FUNCTIONALITY--------------------------*)
     fun boolean_check x = 
-        if (x <> true) andalso (x <> false) then report_error ("non_boolean_result", 0) else ()
+        if (getType x)<>"boolean" then report_error ("non_boolean_result", 0) else ()
 
     fun function_not_done_check p = 
-        if (p = true) orelse (p = false) then report_error ("type_mismatch", 0) else ()
+        if (getType p)<>"function" then report_error ("type_mismatch", 0) else ()
+    
 (* applies the list of arguments to the property - one by one - reporting errors along the way *)
 (* TODO: handle when arguments are passed to a property that does not take arguments *)
     fun apply_args p l =
@@ -155,24 +156,31 @@ Error: Couldn't produce a function of the desired arity, please
 
 (* Runs however many tests specified on a property, while always generating new inputs. 
     Drops further execution if a Failure is found.  *)
-    fun core_forall (generator, prop, 0, size, pre, cap) = {success = true, cEx = (), remTests = 0}
+    fun core_forall (generator, prop, 0, size, pre, cap) = {failReason = (), cEx = (), remTests = 0}
         |core_forall (generator, prop, i, size, pre, cap) =  
             let val args = map (fn x => x size) generator in
             case pre of 
                 () => 
                     if (apply_args prop args) then (write "."; core_forall (generator, prop, i-1, size+1, pre, cap))
-                    else (write "!"; {success = false, cEx = args, remTests = i})
+                    else (write "!"; {failReason = "false_prop", cEx = args, remTests = i})
                 | _ => 
                     if (apply_args pre args) then 
                         if (apply_args prop args) then (write "."; core_forall (generator, prop, i-1, size+1, pre, cap))
-                        else {success = false, cEx = args, remTests = i}
+                        else {failReason = "false_prop", cEx = args, remTests = i}
                     else 
                     (write "x"; 
                     if (size = cap) andalso (i*5 = cap) then report_error ("cant_satisfy", size)
-                    else if size = cap then {success = true, cEx = (), remTests = i}
+                    else if size = cap then {failReason = (), cEx = (), remTests = i}
                     else core_forall (generator, prop, i, size+1, pre, cap))
             end
     
+    fun report_fail_reason rec noOfTests= 
+        case rec.failReason of
+            "false_prop" => write "\nFailure at input: ";
+                            write (args_toString rec.cEx);
+                            write ("\nAfter running: " ^ (toString (noOfTests - rec.remTests + 1)) ^ " test(s)\n")
+
+
     (* Tests a property function a given number of times. *)
     (* test tc itself - maybe by returning result *)
     fun tc_n generator p noOfTests = 
@@ -181,14 +189,15 @@ Error: Couldn't produce a function of the desired arity, please
                     (x,y) => (x,y)
                     | x => (x, ())
             val res = core_forall (generator, prop, noOfTests, 0, pre, (noOfTests*5)) in 
-            case res.success of
-                false => write "\nFailure at input: ";
-                            print (res.cEx);
-                            write ("After running: " ^ (toString (noOfTests - res.remTests + 1)) ^ " test(s)\n"); false
-                | true => write ("\u001B[1m \u001B[32m \nSuccess: \u001B[0mPassed all " ^ (toString noOfTests) ^ " test(s).\n"); true
+            case res.failReason of
+                () => write ("\u001B[1m \u001B[32m \nSuccess: \u001B[0mPassed all " ^ (toString noOfTests) ^ " test(s).\n"); true
+                |_ => report_fail_reason res noOfTests; false
         end
 (* Tests a property function 100 times. *)
     fun tc generator p = tc_n generator p 100
+
+    fun troupecheck generator p noOfTests = spawn (fn() => tc_n generator p noOfTests)
+    | troupecheck generator p = spawn (fn() => tc generator p)
 
 (* --------------------------User convenience functions -------------------------*)
     val inf = 1 / 0
@@ -297,7 +306,9 @@ Error: Couldn't produce a function of the desired arity, please
     fun both_ceil_test i =
         my_ceil_1 i = my_ceil_2 i
     
-    fun tup_test x y z w = x+y+z+w = w+z+y+x
+    fun tup_test x y z w = x+y+z+w < 100 (* = w+z+y+x *)
+
+    fun no_args() = true
 (* ----------------------------For the userguide------------------------------- *)
     fun filter_less ([], _) = []
     | filter_less ((x::xs), p) = 
@@ -333,8 +344,6 @@ Error: Couldn't produce a function of the desired arity, please
 
     fun cons_length_increase xs x = 
         (length (x::xs)) = ((length xs) + 1)
-
-    fun no_args() = true
 (* ----------------------------For tc^2---------------------------------------- *)
     fun tc_sort_length_always_fails () =    
         tc [list(integer())] my_sort_keep_length = false
@@ -343,11 +352,11 @@ Error: Couldn't produce a function of the desired arity, please
         tc [list(integer())] my_sort_is_ordered = true
 in
 
-(* tc^2 tests *)
-tc [] tc_sort_ordered_always_true
-
-(* (* User guide tests *)
-tc [(record ["theInteger", "theString"][integer(), string()]), integer()] rec_test;
+tc [integer(), integer(), integer(), integer()] tup_test
+(* (* tc^2 tests *)
+troupecheck [] tc_sort_ordered_always_true *)
+(* User guide tests *)
+(* tc [(record ["theInteger", "theString"][integer(), string()]), integer()] rec_test;
 tc [list(integer()), integer()] cons_length_increase;
 tc [list(integer())] my_sort_is_ordered;
 tc [list(integer())] my_sort_keep_length;
