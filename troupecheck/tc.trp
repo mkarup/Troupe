@@ -138,12 +138,76 @@ Error: Couldn't produce a function of the desired arity, please
 
 
 (* ----------------------CORE FUNCTIONALITY--------------------------*)
-    fun boolean_check x = 
+    fun arg_is_minimum_inst = 
+        case getType x of  
+            "list" =>  x = []
+            | "number" => x = 0 
+            | "boolean" => x = false 
+            | "string" => x = "" 
+            | "record" => false 
+            | "tuple" => false
+    
+    fun get_shrinker arg = 
+        case getType arg of  
+            "list" =>  x = []
+            | "number" => x = 0 
+            | "boolean" => x = false 
+            | "string" => x = "" 
+            | "record" => false 
+            | "tuple" => false
+
+    fun arg_shrink arg = 
+        case getType arg of 
+                    "list" => shrink_list arg
+                    | "number" => shrink_number arg
+                    | "boolean" => shrink_bool arg 
+                    | "string" => shrink_string arg 
+                    | "record" => shrink_rec arg 
+                    | "tuple" => shrink_tuple arg
+
+    and boolean_check x = 
         if (getType x)<>"boolean" then report_error ("non_boolean_result", 0) else ()
 
-    fun function_not_done_check p = 
+    and function_not_done_check p = 
         if (getType p)<>"function" then report_error ("type_mismatch", 0) else ()
+
+    and shrink_number n = 
+        if n-1 <= 0 then 0 else n-1
     
+    and shrink_bool n = 
+        n
+    
+    and shrink_string n = 
+        n
+
+    and shrink_rec n = 
+        n
+    
+    and shrink_tuple n = 
+        n
+    
+    and shrink_list [] = [] 
+    | shrink_list (x::xs) = x
+
+
+    and args_shrink args = 
+        let fun shrink_aux [] acc = acc
+            | shrink_aux (x::xs) acc = 
+                let val x_shrunk = arg_shrink x in
+                append [x_shrunk] (args_shrink xs) end in 
+            (shrink_aux args []) end
+    
+    fun args_is_minumum_insts [] = true 
+    | args_is_minumum_insts (x::xs) = 
+        case getType x of  
+            "list" => if x = [] then args_is_minumum_insts xs else false
+            | "number" => if x = 0 then args_is_minumum_insts xs else false
+            | "boolean" => if x = false then args_is_minumum_insts xs else false
+            | "string" => if x = "" then args_is_minumum_insts xs else false
+            | "record" => false 
+            | "tuple" => false
+
+
 (* applies the list of arguments to the property - one by one - reporting errors along the way *)
 (* TODO: handle when arguments are passed to a property that does not take arguments *)
     fun apply_args p l =
@@ -153,6 +217,15 @@ Error: Couldn't produce a function of the desired arity, please
                 let val res = foldl (fn (x,y) => function_not_done_check y; y x) p l in
                 boolean_check res;
                 res end
+
+    fun shrink args prop counter = 
+        let val shrunk_args = args_shrink args in
+        case apply_args prop shrunk_args of
+            true => {shrunk_ctx = args, count = counter} 
+            | false => 
+                if args_is_minumum_insts shrunk_args then {shrunk_ctx = shrunk_args, count = counter} 
+                else shrink shrunk_args prop (counter+1) end
+            
 
 (* Runs however many tests specified on a property, while always generating new inputs. 
     Drops further execution if a Failure is found.  *)
@@ -191,7 +264,14 @@ Error: Couldn't produce a function of the desired arity, please
             val res = core_forall (generator, prop, noOfTests, 0, pre, (noOfTests*5)) in 
             case res.failReason of
                 () => write ("\u001B[1m \u001B[32m \nSuccess: \u001B[0mPassed all " ^ (toString noOfTests) ^ " test(s).\n"); true
-                |_ => report_fail_reason res noOfTests; false
+                |_ => 
+                    let val shrink_res = shrink res.cEx prop 0 in
+                    report_fail_reason res noOfTests; 
+                    write "\nFailing test case was shrunk to: ";
+                    write (args_toString shrink_res.shrunk_ctx);
+                    write (" After " ^ (toString shrink_res.count) ^ " iterations.");
+                    false
+                    end
         end
 (* Tests a property function 100 times. *)
     fun tc generator p = tc_n generator p 100
@@ -306,7 +386,7 @@ Error: Couldn't produce a function of the desired arity, please
     fun both_ceil_test i =
         my_ceil_1 i = my_ceil_2 i
     
-    fun tup_test x y z w = x+y+z+w < 100 (* = w+z+y+x *)
+    fun tup_test x y = x+y < 100 (* = w+z+y+x *)
 
     fun no_args() = true
 (* ----------------------------For the userguide------------------------------- *)
@@ -352,7 +432,7 @@ Error: Couldn't produce a function of the desired arity, please
         tc [list(integer())] my_sort_is_ordered = true
 in
 
-tc [integer(), integer(), integer(), integer()] tup_test
+tc [integer(), integer()] tup_test
 (* (* tc^2 tests *)
 troupecheck [] tc_sort_ordered_always_true *)
 (* User guide tests *)
