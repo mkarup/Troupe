@@ -469,3 +469,64 @@ tc  [float()] my_ceil_2_test;
 write "Testing on both ceil functions:";
 tc  [float()] both_ceil_test *)
 end
+
+(*
+-----------------------------------------
+ Code that may need to beused later. 
+-----------------------------------------
+ *)
+
+ (* fun le tup = 
+        case tup of 
+        (inf, _) => true 
+        | (_, inf) => true
+        | (a,b) => a <= b 
+    
+    fun find_limit x low high fallback =
+        case (le(low, x)) andalso (le(x, high)) of 
+        true => x 
+        |false => fallback
+    
+    fun sign x = 
+        if x > 0 then 1 
+        else if x < 0 then -1
+        else 0
+
+    fun find_target x low high =
+        case (le(low,0), le(0,high)) of 
+        (false, _) => 
+            let val limit = find_limit(x, low, high, high) in
+	        (low, fn y => y + 1, fn y => y > limit) end
+	    | (true,false) =>
+	        let val limit = find_limit(x, low, high, low) in 
+	        (high, fn y => y - 1, fn y => y < limit) end
+	    | (true,true) =>
+	        let val sign = sign x 
+	            val overLimit =
+		            case x >= 0 of
+		            true => 
+                        let val limit = find_limit(x, low, high, high) in 
+			            fn y => y > limit end
+		            | false =>
+			            let val limit = find_limit(x, low, high, low) in 
+			            fn y => y < Limit end in 
+	        (0, fn y => y + sign, overLimit) end
+    
+    fun number_shrinker x low high action = 
+        case action.0 of 
+        "init" => 
+            let val (target, inc, overLimit) = find_target x low high in 
+            case x = target of 
+            true => ([], "done")
+            | false => ([target], ("inc", target, inc, overLimit)) end
+        | "inc" => 
+            let val (last, inc, overLimit) = (action.1, action.2, action.3)  
+                val newLast = inc last in
+            case overLimit newLast of
+	        true => ([], "done")
+	        | false => ([newLast], ("inc", newLast, inc, overLimit)) end
+        | "shrunk" => 
+            ([], "done")
+
+    fun get_shrinker arg = 
+        number_shrinker *)
