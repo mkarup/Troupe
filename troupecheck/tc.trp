@@ -1,19 +1,21 @@
-import lists
-let      
-(* ----------------USED FOR PRINTING TO CONSOLE-------------------- *)
-    val out = getStdout authority
+import lists  
+(* 
+--------------------------------
+PRINTING TO CONSOLE
+-------------------------------- 
+*)
+let val out = getStdout authority
     fun write x = fwrite (out, x)
     (* arguments are always in a list - for easier readability these are removed when converting arguments to string *)
     fun args_toString args = 
         let fun aux_toString acc (x0::x1::xs) = aux_toString (acc ^ (toString x0) ^ ", ") (x1::xs)
             | aux_toString acc (x::xs) = acc ^ (toString x) in 
         aux_toString "" args end
-(* -------------------------------Error Handling-------------------------------- *)
 (* 
-arity_limit ->
-Error: Couldn't produce a function of the desired arity, please
-    recompile PropEr with an increased value for ?MAX_ARITY.
- *)
+--------------------------------
+ERROR HANDLING
+-------------------------------- 
+*)
     fun report_error error_reason = 
         write "\u001B[31m \nError: "; (* Changing the print color to red *)
         let val err_string = case error_reason of 
@@ -28,15 +30,22 @@ Error: Couldn't produce a function of the desired arity, please
         write (err_string ^ "\u001B[0m"); (* Changing the color back *)
         exit (authority, 0) end
     
-(* -----------------GENERATORS AND UTILS--------------------------*)
-(* Generates a random boolean *) 
+(*
+--------------------------------
+GENERATORS AND UTILS
+-------------------------------- 
+*) 
+    fun remove_nth n [] i = []
+    | remove_nth n (x::xs) i = 
+        if n = i then xs
+        else x :: (remove_nth n xs (i + 1))
+    
     fun bool_gen size = 
         let val rnd = random() 
             val res =  if rnd < 1/2 then false
                        else true in
         res end
 
-(* Generates a random float based on number of tests that has been run so far. *)
     fun float_gen (low, high) size = 
         let val x = random() 
             val lInf = low = 1/0 (* check for inf *)
@@ -49,23 +58,19 @@ Error: Couldn't produce a function of the desired arity, please
             | (false, false) => low + (x * (high-low))
             end
 
-(* Generates a random integer based on number of tests that has been run so far. *)
     fun int_gen (low, high) size = 
         floor (float_gen(low, high) size) 
     
-(* Create a list of some determined size. *)
     fun make_list (f, i) = 
         case i of 
         0 => []
         | _ => append [f()] (make_list (f, i-1))
 
-(* Generates a randomly sized list of some specified type of elements. *)
     and list_gen (generator) size = 
         let val length = (int_gen(0, size) size) in
         make_list ((fn () => generator size), length) end
 
-(* Generates a random character - no spaces or sepcial characters,
-     only letters (upper and lower case) and numbers. *)
+(* NOTE: Generates only letters (upper and lower case) and numbers. *)
     fun char_gen size =
         let val chars = 
             ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
@@ -76,16 +81,14 @@ Error: Couldn't produce a function of the desired arity, please
             val x = int_gen (1, ((length chars)-1)) size in 
             nth chars x end
 
-(* Generates a random string, with length ranging from 0 to size,
-     only letters (upper and lower case) and numbers. *)
+(* NOTE: Generates only strings of letters (upper and lower case) and numbers. *)
     fun string_gen size = 
         let val x = int_gen (0, size) size
             fun fold f acc 0 = acc 
             | fold f acc i = fold f (acc ^ f()) (i-1) in 
         fold char_gen "" x end
 
-(* Generates a tuple *)
-(* Hardcoded for tuple of up to 10 elements *)
+(* NOTE: Hardcoded for tuple of up to 10 elements *)
     fun tuple_gen ts i = 
         case ts of 
             [] => (0)
@@ -101,7 +104,10 @@ Error: Couldn't produce a function of the desired arity, please
             |[x1,x2,x3,x4,x5,x6,x7,x8,x9,x10] => (x1,x2,x3,x4,x5,x6,x7,x8,x9,x10)
             |_ => (2, 3, 4, 5)
 
-(* Generates a record with fields corresponding to first list of strings, and values corresponding to second list *)    
+(* 
+ns: list of strings - will be used as fieldnames
+ts: list of generators - used to generate values for fields 
+*)    
     fun rec_gen ns ts = 
         let val noOfElems = length ts 
         in if (length ns) <> noOfElems then 
@@ -115,7 +121,7 @@ Error: Couldn't produce a function of the desired arity, please
                 in 
                 (record_aux ((fn i => recordExtend({}, y, (v i))), ys, vs)) end end
 
-(* Generates a random generator *)
+
     fun generator_gen size = 
         let val rnd = random()
             val inf = 1/0
@@ -132,81 +138,105 @@ Error: Couldn't produce a function of the desired arity, please
         let val bool = bool_gen 0 in
             if bool then x
             else y end
-    
+
+
+(* 
+--------------------------------
+CORE FUNCTIONALITY
+-------------------------------- 
+*)
     fun abs_value x = 
         if x < 0 then -x else x 
 
-
-(* ----------------------CORE FUNCTIONALITY--------------------------*)
-    fun arg_is_minimum_inst = 
+    fun arg_is_minimum_inst x = 
         case getType x of  
-            "list" =>  x = []
-            | "number" => x = 0 
-            | "boolean" => x = false 
-            | "string" => x = "" 
-            | "record" => false 
-            | "tuple" => false
+        "list" =>  x = []
+        | "number" => x = 0 
+        | "boolean" => x = false 
+        | "string" => x = "" 
+        | "record" => false 
+        | "tuple" => false
     
-    fun get_shrinker arg = 
-        case getType arg of  
-            "list" =>  x = []
-            | "number" => x = 0 
-            | "boolean" => x = false 
-            | "string" => x = "" 
-            | "record" => false 
-            | "tuple" => false
+    fun get_shrinker x = 
+        case getType x of  
+        "list" =>  shrink_list 
+        | "number" => shrink_number 
+        | "boolean" => shrink_bool
+        | "string" => shrink_string
+        | "record" => shrink_rec
+        | "tuple" => shrink_tuple
 
-    fun arg_shrink arg = 
-        case getType arg of 
-                    "list" => shrink_list arg
-                    | "number" => shrink_number arg
-                    | "boolean" => shrink_bool arg 
-                    | "string" => shrink_string arg 
-                    | "record" => shrink_rec arg 
-                    | "tuple" => shrink_tuple arg
+    and arg_shrink arg  = 
+        case getType arg.curr of 
+        "list" => shrink_list arg 
+        | "number" => shrink_number arg 
+        | "boolean" => shrink_bool arg 
+        | "string" => shrink_string arg 
+        | "record" => shrink_rec arg 
+        | "tuple" => shrink_tuple arg 
 
-    and boolean_check x = 
-        if (getType x)<>"boolean" then report_error ("non_boolean_result", 0) else ()
-
-    and function_not_done_check p = 
-        if (getType p)<>"function" then report_error ("type_mismatch", 0) else ()
-
-    and shrink_number n = 
-        if n-1 <= 0 then 0 else n-1
+    and shrink_number rec = 
+        case rec.state of 
+        "rollback" => 
+            {state = "done", curr = rec.prev}
+        | _ => 
+            let val newVal = if (abs_value rec.curr)-1 <= 0 then 0 else rec.curr/2 
+                val nextState = if newVal = 0 then "done" else "cont" in 
+            {state = nextState, curr = newVal, prev = rec.curr} end
     
     and shrink_bool n = 
-        n
+        3
     
     and shrink_string n = 
-        n
+        3
 
     and shrink_rec n = 
-        n
+        3
     
     and shrink_tuple n = 
-        n
+        3
     
-    and shrink_list [] = [] 
-    | shrink_list (x::xs) = x
+    and shrink_list rec  = 
+        if (rec.curr = []) andalso (rec.state <> "rollback") then {rec with state = "done"}
+        else 
+            case rec.state of 
+            "init" => 
+                let val removeIdx = length rec.curr - 1
+                    val newList = remove_nth removeIdx rec.curr 0 in 
+                {state = "cont_size", curr = newList, prev = rec.curr, idx = removeIdx} end
+            | "cont_size" => 
+                let val removeIdx = (rec.idx - 1)
+                    val nextState = if removeIdx <= 0 then "cont_elem" else "cont_size"
+                    val newList = remove_nth removeIdx rec.curr 0 in  
+                    {state = nextState, curr = newList, prev = rec.curr, idx = removeIdx} end
+            | "cont_elem" => 
+                let val shrinker = get_shrinker (nth rec.curr 1)
+                    val interimList = (map (fn x => shrinker {state = "init", curr = x}) rec.curr)
+                    val nextState = if (foldl (fn (x,y) => (x.state = "done") andalso y) true interimList) then "done" else "cont_elem"
+                    val newList = map (fn x => x.curr) interimList in
+                {state = nextState, curr = newList, prev = rec.curr, idx = rec.idx} end
+            | "rollback" => 
+                if (length rec.curr) = (length rec.prev) then {state = "done", curr = rec.prev}
+                else {state = "cont_size", curr = rec.prev, idx = rec.idx}
 
 
     and args_shrink args = 
-        let fun shrink_aux [] acc = acc
-            | shrink_aux (x::xs) acc = 
-                let val x_shrunk = arg_shrink x in
-                append [x_shrunk] (args_shrink xs) end in 
-            (shrink_aux args []) end
-    
-    fun args_is_minumum_insts [] = true 
-    | args_is_minumum_insts (x::xs) = 
-        case getType x of  
-            "list" => if x = [] then args_is_minumum_insts xs else false
-            | "number" => if x = 0 then args_is_minumum_insts xs else false
-            | "boolean" => if x = false then args_is_minumum_insts xs else false
-            | "string" => if x = "" then args_is_minumum_insts xs else false
-            | "record" => false 
-            | "tuple" => false
+        case args.state of 
+        "rollback" => 
+            let val rollbackReadyArgs = map (fn x => {x with state = "rollback"}) args.args
+                val argsRolledBack = map (fn x => arg_shrink x) rollbackReadyArgs in 
+            {state = "cont", args = argsRolledBack} end
+        |_ => 
+            let val newArgs = map (fn x => arg_shrink x) args.args 
+                val nextState = if (foldl (fn (x,y) => (x.state = "done") andalso y) true newArgs) then "done" else "cont" in 
+            {state = nextState, args = newArgs} end
+            
 
+    fun boolean_check x = 
+        if (getType x)<>"boolean" then report_error ("non_boolean_result", 0) else ()
+
+    fun function_not_done_check p = 
+        if (getType p)<>"function" then report_error ("type_mismatch", 0) else ()
 
 (* applies the list of arguments to the property - one by one - reporting errors along the way *)
 (* TODO: handle when arguments are passed to a property that does not take arguments *)
@@ -218,17 +248,23 @@ Error: Couldn't produce a function of the desired arity, please
                 boolean_check res;
                 res end
 
-    fun shrink args prop counter = 
-        let val shrunk_args = args_shrink args in
-        case apply_args prop shrunk_args of
-            true => {shrunk_ctx = args, count = counter} 
-            | false => 
-                if args_is_minumum_insts shrunk_args then {shrunk_ctx = shrunk_args, count = counter} 
-                else shrink shrunk_args prop (counter+1) end
-            
+    fun shrink_aux args prop counter = 
+        let val shrunk_args = args_shrink args
+            val shrunk_args_raw = map (fn x => x.curr) shrunk_args.args in
+            print "shrunk args raw-----------------";
+            print shrunk_args_raw;
+        case apply_args prop shrunk_args_raw of
+            true => shrink_aux (args_shrink {state = "rollback", args = shrunk_args.args}) prop (counter+1)
+            | false =>
+                if shrunk_args.state = "done" then {shrunk_ctx = shrunk_args_raw, count = counter} else shrink_aux shrunk_args prop (counter+1) end
 
-(* Runs however many tests specified on a property, while always generating new inputs. 
-    Drops further execution if a Failure is found.  *)
+    fun shrink args prop counter = 
+        let val newArgs = map (fn x => {state = "init", curr = x}) args 
+            val res = shrink_aux ({state = "init", args = newArgs}) prop counter in 
+            print "testing";
+            res end
+        
+            
     fun core_forall (generator, prop, 0, size, pre, cap) = {failReason = (), cEx = (), remTests = 0}
         |core_forall (generator, prop, i, size, pre, cap) =  
             let val args = map (fn x => x size) generator in
@@ -253,9 +289,6 @@ Error: Couldn't produce a function of the desired arity, please
                             write (args_toString rec.cEx);
                             write ("\nAfter running: " ^ (toString (noOfTests - rec.remTests + 1)) ^ " test(s)\n")
 
-
-    (* Tests a property function a given number of times. *)
-    (* test tc itself - maybe by returning result *)
     fun tc_n generator p noOfTests = 
         let val (prop, pre) = 
                 case p of    
@@ -269,17 +302,21 @@ Error: Couldn't produce a function of the desired arity, please
                     report_fail_reason res noOfTests; 
                     write "\nFailing test case was shrunk to: ";
                     write (args_toString shrink_res.shrunk_ctx);
-                    write (" After " ^ (toString shrink_res.count) ^ " iterations.");
+                    write (" After " ^ (toString shrink_res.count) ^ " iterations.\n");
                     false
                     end
         end
-(* Tests a property function 100 times. *)
+    
     fun tc generator p = tc_n generator p 100
 
     fun troupecheck generator p noOfTests = spawn (fn() => tc_n generator p noOfTests)
     | troupecheck generator p = spawn (fn() => tc generator p)
 
-(* --------------------------User convenience functions -------------------------*)
+(* 
+--------------------------------
+CONVENIENCE FUNCTIONS
+-------------------------------- 
+*)
     val inf = 1 / 0
     fun integer() = int_gen(inf, inf)
         | integer (h, l) = int_gen(h, l)
@@ -305,12 +342,15 @@ Error: Couldn't produce a function of the desired arity, please
     fun char() = char_gen
 
     fun tuple ts = tuple_gen ts
-        
     
     fun record ns ts = rec_gen ns ts
         
     
-(* --------------------------functions to test on-------------------------------- *) 
+(* 
+--------------------------------
+FUNCTIONS FOR TESTING
+-------------------------------- 
+*) 
     fun my_reverse xs = 
         xs
     
@@ -340,7 +380,15 @@ Error: Couldn't produce a function of the desired arity, please
         if i > 0 then (my_floor i) + 1
         else if i = 0 then 0
         else (my_floor i) + 1
-(* --------------------------Propterties to run-------------------------*)
+    
+    fun bad_insert xs x = 
+        if length xs < 10 then append [x] xs else
+        xs
+(*
+--------------------------------
+PROPERTIES FOR TESTING
+-------------------------------- 
+*)
     fun bool_commutative x y = 
         (x andalso y) = (y andalso x)
     
@@ -389,7 +437,15 @@ Error: Couldn't produce a function of the desired arity, please
     fun tup_test x y = x+y < 100 (* = w+z+y+x *)
 
     fun no_args() = true
-(* ----------------------------For the userguide------------------------------- *)
+
+    fun test_bad_insert xs x =
+        length (bad_insert xs x) = (length xs) + 1 
+
+(* 
+--------------------------------
+USED FOR USERGUIDE
+-------------------------------- 
+*)
     fun filter_less ([], _) = []
     | filter_less ((x::xs), p) = 
         if x < p then append [x] (filter_less (xs, p)) else (filter_less (xs, p))
@@ -424,7 +480,11 @@ Error: Couldn't produce a function of the desired arity, please
 
     fun cons_length_increase xs x = 
         (length (x::xs)) = ((length xs) + 1)
-(* ----------------------------For tc^2---------------------------------------- *)
+(*
+--------------------------------
+TC^2
+-------------------------------- 
+*)
     fun tc_sort_length_always_fails () =    
         tc [list(integer())] my_sort_keep_length = false
     
@@ -432,16 +492,16 @@ Error: Couldn't produce a function of the desired arity, please
         tc [list(integer())] my_sort_is_ordered = true
 in
 
-tc [integer(), integer()] tup_test
+tc [list(integer()), integer()] test_bad_insert
 (* (* tc^2 tests *)
 troupecheck [] tc_sort_ordered_always_true *)
 (* User guide tests *)
-(* tc [(record ["theInteger", "theString"][integer(), string()]), integer()] rec_test;
-tc [list(integer()), integer()] cons_length_increase;
+(* tc [list(integer()), integer()] cons_length_increase;
 tc [list(integer())] my_sort_is_ordered;
 tc [list(integer())] my_sort_keep_length;
 tc [list(integer())] (my_sort_keep_length, no_duplicates);
 (* General functionality tests *)
+tc [(record ["theInteger", "theString"][integer(), string()]), integer()] rec_test;
 tc [] no_args;
 tc [integer(), integer(), integer(), integer()] tup_test;
 write "\nTesting on bools commutative:";
