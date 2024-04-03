@@ -247,7 +247,7 @@ SHRINKING
             val shrunk_args_raw = map (fn x => x.curr) shrunk_args.args in
             
         case apply_args prop shrunk_args_raw of
-            true => shrink_aux (args_shrink {state = "rollback", args = shrunk_args.args}) prop (counter+1)
+            true => shrink_aux (args_shrink {state = "rollback", args = shrunk_args.args}) prop (counter)
             | false =>
                 if shrunk_args.state = "done" then {shrunk_ctx = shrunk_args_raw, count = counter} else shrink_aux shrunk_args prop (counter+1) end
 
@@ -293,11 +293,12 @@ CORE FUNCTIONALITY
             case res.failReason of
                 () => write ("\u001B[1m \u001B[32m \nSuccess: \u001B[0mPassed all " ^ (toString noOfTests) ^ " test(s).\n"); true
                 |_ => 
-                    let val shrink_res = shrink res.cEx prop in
                     report_fail_reason res noOfTests; 
-                    write "\nFailing test case was shrunk to: ";
+                    write ("\u001B[1m\u001B[34mShrinking\u001B[0m:");
+                    let val shrink_res = shrink res.cEx prop in
+                    write "\nFailing test case was shrunk to:\n";
                     write (args_toString shrink_res.shrunk_ctx);
-                    write (" After " ^ (toString shrink_res.count) ^ " iterations.\n");
+                    write ("\nAfter " ^ (toString shrink_res.count) ^ " iterations.\n");
                     false
                     end
         end
