@@ -26,20 +26,49 @@ ERROR HANDLING
             | ("type_mismatch", _) => "The types' structure doesn't match the property.\n"
             | ("illegal_gen_def", _ ) => "Generator is defined wrong - use tuple() or record() to combine generators.\n"
             | ("record_mismatch", _) => "the number of names provided for record generation, does not match the number of types provided.\n"
+            | ("shrinking_looped", _) => "Shrinking looped\n"
         in
         write (err_string ^ "\u001B[0m"); (* Changing the color back *)
         exit (authority, 0) end
     
+    fun boolean_check x = 
+        if (getType x)<>"boolean" then report_error ("non_boolean_result", 0) else ()
+
+    fun function_not_done_check p = 
+        if (getType p)<>"function" then report_error ("type_mismatch", 0) else ()
 (*
 --------------------------------
-GENERATORS AND UTILS
+UTILS
 -------------------------------- 
-*) 
+*)  
+
     fun remove_nth n [] i = []
     | remove_nth n (x::xs) i = 
         if n = i then xs
         else x :: (remove_nth n xs (i + 1))
     
+    fun make_list (f, i) = 
+    case i of 
+    0 => []
+    | _ => append [f()] (make_list (f, i-1))
+    
+    fun abs_value x = 
+    if x < 0 then -x else x 
+
+(* applies the list of arguments to the property - one by one - reporting errors along the way *)
+(* TODO: handle when arguments are passed to a property that does not take arguments *)
+    fun apply_args p l =
+        case l of 
+            [] => boolean_check (p()); p() (* this case is only reached if there are no generators to beign with*)
+            | (x::xs) => 
+                let val res = foldl (fn (x,y) => function_not_done_check y; y x) p l in
+                boolean_check res;
+                res end
+(*
+--------------------------------
+GENERATORS
+-------------------------------- 
+*)  
     fun bool_gen size = 
         let val rnd = random() 
             val res =  if rnd < 1/2 then false
@@ -60,13 +89,8 @@ GENERATORS AND UTILS
 
     fun int_gen (low, high) size = 
         floor (float_gen(low, high) size) 
-    
-    fun make_list (f, i) = 
-        case i of 
-        0 => []
-        | _ => append [f()] (make_list (f, i-1))
 
-    and list_gen (generator) size = 
+    fun list_gen (generator) size = 
         let val length = (int_gen(0, size) size) in
         make_list ((fn () => generator size), length) end
 
@@ -133,30 +157,12 @@ ts: list of generators - used to generate values for fields
                       if rnd <= 6/7 then ((fn i => tuple_gen (list_gen (fn _ => int_gen(inf, inf)) i) i)) else
                      ((fn i => list_gen (int_gen(inf, inf)) i)) in
         res end
-    
-    fun one_of_two (x, y) =
-        let val bool = bool_gen 0 in
-            if bool then x
-            else y end
-
-
 (* 
 --------------------------------
-CORE FUNCTIONALITY
+SHRINKING
 -------------------------------- 
-*)
-    fun abs_value x = 
-        if x < 0 then -x else x 
+*)  
 
-    fun arg_is_minimum_inst x = 
-        case getType x of  
-        "list" =>  x = []
-        | "number" => x = 0 
-        | "boolean" => x = false 
-        | "string" => x = "" 
-        | "record" => false 
-        | "tuple" => false
-    
     fun get_shrinker x = 
         case getType x of  
         "list" =>  shrink_list 
@@ -167,25 +173,30 @@ CORE FUNCTIONALITY
         | "tuple" => shrink_tuple
 
     and arg_shrink arg  = 
-        case getType arg.curr of 
-        "list" => shrink_list arg 
-        | "number" => shrink_number arg 
-        | "boolean" => shrink_bool arg 
-        | "string" => shrink_string arg 
-        | "record" => shrink_rec arg 
-        | "tuple" => shrink_tuple arg 
-
-    and shrink_number rec = 
-        case rec.state of 
-        "rollback" => 
-            {state = "done", curr = rec.prev}
-        | _ => 
-            let val newVal = if (abs_value rec.curr)-1 <= 0 then 0 else rec.curr/2 
-                val nextState = if newVal = 0 then "done" else "cont" in 
-            {state = nextState, curr = newVal, prev = rec.curr} end
+        let val shrinker = get_shrinker arg.curr in 
+        shrinker arg end
     
-    and shrink_bool n = 
-        3
+    and shrink_number rec = 
+        let val rec_checked = if rec.curr = 0 then {rec with state = "done"} else rec in 
+        case rec_checked.state of 
+        "rollback" => 
+            {state = "done", curr = rec_checked.prev}
+        |"done" => 
+            rec_checked
+        | _ => 
+            let val newVal = if (abs_value rec_checked.curr)-1 <= 0 then 0 else rec_checked.curr/2 in 
+            {state = "cont", curr = newVal, prev = rec_checked.curr} end end
+    
+    and shrink_bool rec = 
+        let val rec_checked = if rec.curr = false then {rec with state = "done"} else rec in 
+        case rec_checked.state of 
+        "rollback" => 
+            {state = "done", curr = rec_checked.prev}
+        |"done" => 
+            rec_checked
+        | _ => 
+            let val newVal = false in
+            {state = "cont", curr = newVal, prev = rec_checked.curr} end end
     
     and shrink_string n = 
         3
@@ -219,52 +230,36 @@ CORE FUNCTIONALITY
                 if (length rec.curr) = (length rec.prev) then {state = "done", curr = rec.prev}
                 else {state = "cont_size", curr = rec.prev, idx = rec.idx}
 
-
     and args_shrink args = 
         case args.state of 
         "rollback" => 
-            let val rollbackReadyArgs = map (fn x => {x with state = "rollback"}) args.args
+            let val rollbackReadyArgs = map (fn x => if x.state = "done" then x else {x with state = "rollback"}) args.args
                 val argsRolledBack = map (fn x => arg_shrink x) rollbackReadyArgs in 
             {state = "cont", args = argsRolledBack} end
         |_ => 
             let val newArgs = map (fn x => arg_shrink x) args.args 
                 val nextState = if (foldl (fn (x,y) => (x.state = "done") andalso y) true newArgs) then "done" else "cont" in 
             {state = nextState, args = newArgs} end
-            
-
-    fun boolean_check x = 
-        if (getType x)<>"boolean" then report_error ("non_boolean_result", 0) else ()
-
-    fun function_not_done_check p = 
-        if (getType p)<>"function" then report_error ("type_mismatch", 0) else ()
-
-(* applies the list of arguments to the property - one by one - reporting errors along the way *)
-(* TODO: handle when arguments are passed to a property that does not take arguments *)
-    fun apply_args p l =
-        case l of 
-            [] => boolean_check (p()); p() (* this case is only reached if there are no generators to beign with*)
-            | (x::xs) => 
-                let val res = foldl (fn (x,y) => function_not_done_check y; y x) p l in
-                boolean_check res;
-                res end
 
     fun shrink_aux args prop counter = 
+        if counter = 100 then report_error ("shrinking_looped", 0) else
         let val shrunk_args = args_shrink args
             val shrunk_args_raw = map (fn x => x.curr) shrunk_args.args in
-            print "shrunk args raw-----------------";
-            print shrunk_args_raw;
+            
         case apply_args prop shrunk_args_raw of
             true => shrink_aux (args_shrink {state = "rollback", args = shrunk_args.args}) prop (counter+1)
             | false =>
                 if shrunk_args.state = "done" then {shrunk_ctx = shrunk_args_raw, count = counter} else shrink_aux shrunk_args prop (counter+1) end
 
-    fun shrink args prop counter = 
+    fun shrink args prop = 
         let val newArgs = map (fn x => {state = "init", curr = x}) args 
-            val res = shrink_aux ({state = "init", args = newArgs}) prop counter in 
-            print "testing";
-            res end
-        
-            
+            val res = shrink_aux ({state = "init", args = newArgs}) prop 0 in 
+            res end        
+(* 
+--------------------------------
+CORE FUNCTIONALITY
+-------------------------------- 
+*)              
     fun core_forall (generator, prop, 0, size, pre, cap) = {failReason = (), cEx = (), remTests = 0}
         |core_forall (generator, prop, i, size, pre, cap) =  
             let val args = map (fn x => x size) generator in
@@ -298,7 +293,7 @@ CORE FUNCTIONALITY
             case res.failReason of
                 () => write ("\u001B[1m \u001B[32m \nSuccess: \u001B[0mPassed all " ^ (toString noOfTests) ^ " test(s).\n"); true
                 |_ => 
-                    let val shrink_res = shrink res.cEx prop 0 in
+                    let val shrink_res = shrink res.cEx prop in
                     report_fail_reason res noOfTests; 
                     write "\nFailing test case was shrunk to: ";
                     write (args_toString shrink_res.shrunk_ctx);
@@ -384,6 +379,11 @@ FUNCTIONS FOR TESTING
     fun bad_insert xs x = 
         if length xs < 10 then append [x] xs else
         xs
+
+    fun one_of_two (x, y) =
+        let val bool = bool_gen 0 in
+        if bool then x
+        else y end    
 (*
 --------------------------------
 PROPERTIES FOR TESTING
@@ -434,7 +434,7 @@ PROPERTIES FOR TESTING
     fun both_ceil_test i =
         my_ceil_1 i = my_ceil_2 i
     
-    fun tup_test x y = x+y < 100 (* = w+z+y+x *)
+    fun tup_test x y z w = x+y+z+w < 100 (* = w+z+y+x *)
 
     fun no_args() = true
 
@@ -492,17 +492,18 @@ TC^2
         tc [list(integer())] my_sort_is_ordered = true
 in
 
-tc [list(integer()), integer()] test_bad_insert
-(* (* tc^2 tests *)
-troupecheck [] tc_sort_ordered_always_true *)
+
+(* tc^2 tests *)
+(* tc [] tc_sort_ordered_always_true; *)
 (* User guide tests *)
-(* tc [list(integer()), integer()] cons_length_increase;
+tc [list(integer()), integer()] cons_length_increase;
 tc [list(integer())] my_sort_is_ordered;
 tc [list(integer())] my_sort_keep_length;
 tc [list(integer())] (my_sort_keep_length, no_duplicates);
 (* General functionality tests *)
 tc [(record ["theInteger", "theString"][integer(), string()]), integer()] rec_test;
 tc [] no_args;
+tc [list(integer()), integer()] test_bad_insert;
 tc [integer(), integer(), integer(), integer()] tup_test;
 write "\nTesting on bools commutative:";
 tc [boolean(), boolean()] bool_commutative;
@@ -527,66 +528,5 @@ tc  [float()] my_ceil_1_test;
 write "Testing on my_ceil_2:";
 tc  [float()] my_ceil_2_test;
 write "Testing on both ceil functions:";
-tc  [float()] both_ceil_test *)
+tc  [float()] both_ceil_test
 end
-
-(*
------------------------------------------
- Code that may need to beused later. 
------------------------------------------
- *)
-
- (* fun le tup = 
-        case tup of 
-        (inf, _) => true 
-        | (_, inf) => true
-        | (a,b) => a <= b 
-    
-    fun find_limit x low high fallback =
-        case (le(low, x)) andalso (le(x, high)) of 
-        true => x 
-        |false => fallback
-    
-    fun sign x = 
-        if x > 0 then 1 
-        else if x < 0 then -1
-        else 0
-
-    fun find_target x low high =
-        case (le(low,0), le(0,high)) of 
-        (false, _) => 
-            let val limit = find_limit(x, low, high, high) in
-	        (low, fn y => y + 1, fn y => y > limit) end
-	    | (true,false) =>
-	        let val limit = find_limit(x, low, high, low) in 
-	        (high, fn y => y - 1, fn y => y < limit) end
-	    | (true,true) =>
-	        let val sign = sign x 
-	            val overLimit =
-		            case x >= 0 of
-		            true => 
-                        let val limit = find_limit(x, low, high, high) in 
-			            fn y => y > limit end
-		            | false =>
-			            let val limit = find_limit(x, low, high, low) in 
-			            fn y => y < Limit end in 
-	        (0, fn y => y + sign, overLimit) end
-    
-    fun number_shrinker x low high action = 
-        case action.0 of 
-        "init" => 
-            let val (target, inc, overLimit) = find_target x low high in 
-            case x = target of 
-            true => ([], "done")
-            | false => ([target], ("inc", target, inc, overLimit)) end
-        | "inc" => 
-            let val (last, inc, overLimit) = (action.1, action.2, action.3)  
-                val newLast = inc last in
-            case overLimit newLast of
-	        true => ([], "done")
-	        | false => ([newLast], ("inc", newLast, inc, overLimit)) end
-        | "shrunk" => 
-            ([], "done")
-
-    fun get_shrinker arg = 
-        number_shrinker *)
