@@ -26,7 +26,8 @@ ERROR HANDLING
             | ("type_mismatch", _) => "The types' structure doesn't match the property.\n"
             | ("illegal_gen_def", _ ) => "Generator is defined wrong - use tuple() or record() to combine generators.\n"
             | ("record_mismatch", _) => "the number of names provided for record generation, does not match the number of types provided.\n"
-            | ("shrinking_looped", _) => "Shrinking looped\n"
+            | ("shrinking_looped", _) => "Shrinking looped.\n"
+            | ("non_string_type", _) => "An element of non-string type found when trying to convert list to string.\n"
         in
         write (err_string ^ "\u001B[0m"); (* Changing the color back *)
         exit (authority, 0) end
@@ -64,6 +65,20 @@ UTILS
                 let val res = foldl (fn (x,y) => function_not_done_check y; y x) p l in
                 boolean_check res;
                 res end
+    
+    fun string_to_list s = 
+        let fun aux "" acc = acc 
+            | aux s acc = 
+                let val x = substring (s, 0, 1)
+                    val xs = substring (s, 1, 1/0) in 
+                aux xs (append acc [x]) end in 
+        aux s [] end
+    
+    fun list_to_string ls = 
+        foldl (fn (x,y) => if getType x <> "string" then report_error ("non_string_type", 0) else y ^ x) "" ls
+    
+    fun string_length s = 
+        length (string_to_list s)
 (*
 --------------------------------
 GENERATORS
@@ -198,8 +213,15 @@ SHRINKING
             let val newVal = false in
             {state = "cont", curr = newVal, prev = rec_checked.curr} end end
     
-    and shrink_string n = 
-        3
+    and shrink_string rec = 
+        case rec.state of 
+        "cont_elem" => 
+            {rec with state = "done"}
+        | _ =>
+            let val ls_of_string = string_to_list rec.curr 
+                val interimRes = shrink_list {rec with curr = ls_of_string} 
+                val res = {interimRes with curr = (list_to_string interimRes.curr)} in
+            res end
 
     and shrink_rec n = 
         3
@@ -229,6 +251,8 @@ SHRINKING
             | "rollback" => 
                 if (length rec.curr) = (length rec.prev) then {state = "done", curr = rec.prev}
                 else {state = "cont_size", curr = rec.prev, idx = rec.idx}
+            | "done" => 
+                rec
 
     and args_shrink args = 
         case args.state of 
@@ -254,7 +278,6 @@ SHRINKING
     fun shrink args prop pre = 
         let val newArgs = map (fn x => {state = "init", curr = x}) args 
             val res = shrink_aux ({state = "init", args = newArgs}) prop pre 0 in 
-            print res;
             res end        
 (* 
 --------------------------------
@@ -271,7 +294,7 @@ CORE FUNCTIONALITY
                 | _ => 
                     if (apply_args pre args) then 
                         if (apply_args prop args) then (write "."; core_forall (generator, prop, i-1, size+1, pre, cap))
-                        else {failReason = "false_prop", cEx = args, remTests = i}
+                        else (write "!"; {failReason = "false_prop", cEx = args, remTests = i})
                     else 
                     (write "x"; 
                     if (size = cap) andalso (i*5 = cap) then report_error ("cant_satisfy", size)
@@ -389,6 +412,10 @@ FUNCTIONS FOR TESTING
     
     fun bad_half n = 
         if n > 10 then n else n/2
+
+    fun lengths_not_same s1 s2 = 
+        (string_length s1) <> (string_length s2)    
+    
 (*
 --------------------------------
 PROPERTIES FOR TESTING
@@ -448,6 +475,9 @@ PROPERTIES FOR TESTING
     
     fun test_bad_half n = 
         n > (bad_half n)
+    
+    fun append_always_longer s1 s2 = 
+        string_length s1 < string_length (s1 ^ s2)
 
 (* 
 --------------------------------
@@ -502,7 +532,9 @@ in
 
 (* shrinking tests *)
 tc [list(integer()), integer()] test_bad_insert;
-tc [integer()] (test_bad_half, (fn x => x >= 15))
+tc [integer()] (test_bad_half, (fn x => x >= 15));
+tc [string(), string()] (append_always_longer, lengths_not_same)
+
 (* tc^2 tests *)
 (* tc [] tc_sort_ordered_always_true; *)
 (* User guide tests *)
