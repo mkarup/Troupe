@@ -161,7 +161,7 @@ SHRINKING - t
             let val ls_curr = string_to_list rec_checked.curr
                 val ls_prev = string_to_list rec_checked.prev
                 val shrinkers = map (fn _ => shrink_char) ls_curr   
-
+                val _ = print rec_checked
                 val interim_res = shrink_list shrinkers {state = rec_checked.state, curr = ls_curr, prev = ls_prev, idx = rec_checked.next_shrink_info} 
                 val new_curr = list_to_string interim_res.curr
                 val new_prev = list_to_string interim_res.prev
