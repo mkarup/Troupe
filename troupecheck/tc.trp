@@ -317,6 +317,8 @@ SHRINKING - t
             in
                 {state = nextState, args = argsRolledBack, shrinkers = args.shrinkers, shrink_idx = shrink_idx} 
             end
+        | "done" => 
+            args
         | _ => 
             let val init_shrink_idx = args.shrink_idx
                 val newArgs = mapi (fn (i, x) => if i = init_shrink_idx then (nth args.shrinkers (i+1)) x else x) args.args
