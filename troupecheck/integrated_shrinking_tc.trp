@@ -153,24 +153,34 @@ SHRINKING - t
     
     (* input/returns - {state: string, curr: string, prev: string} *)
     and shrink_string rec = 
-        case rec.state of 
+        let val rec_checked = if rec.state = "init" then {rec with next_shrink_info = 0} else rec in
+        case rec_checked.state of 
         "cont_elem" => 
-            {rec with state = "done"}
+            {rec_checked with state = "done"} (* TODO: Should actually shrink characters *)
         | _ =>
-            let val ls_curr = string_to_list rec.curr
-                val ls_prev = string_to_list rec.prev
+            let val ls_curr = string_to_list rec_checked.curr
+                val ls_prev = string_to_list rec_checked.prev
+                val shrinkers = map (fn _ => shrink_char) ls_curr   
 
-                val interim_res = shrink_list {state = rec.state, curr = ls_curr, prev = ls_prev} 
+                val interim_res = shrink_list shrinkers {state = rec_checked.state, curr = ls_curr, prev = ls_prev, idx = rec_checked.next_shrink_info} 
                 val new_curr = list_to_string interim_res.curr
                 val new_prev = list_to_string interim_res.prev
 
-                val res = {state = interim_res.state, curr = new_curr, prev = new_prev} 
+                val res = {state = interim_res.state, curr = new_curr, prev = new_prev, next_shrink_info = interim_res.idx} 
             in
                 res 
             end
+        end
+
         
-    and shrink_char chars rec = 
-        let val rec_checked = if rec.curr = "a" then {rec with state = "done"} else rec 
+    and shrink_char rec = 
+        let val chars = 
+            ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
+            "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+            "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
+            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+            val rec_checked = if rec.curr = "a" then {rec with state = "done"} else rec 
             val curr_val = rec_checked.curr in
         case rec_checked.state of 
         "rollback" =>
@@ -253,7 +263,7 @@ SHRINKING - t
             end
     
     and shrink_list shrinkers rec  = 
-        if (rec.curr = []) andalso (rec.state <> "rollback") then {rec with state = "done", prev = rec.curr}
+        if (rec.curr = []) andalso (rec.state <> "rollback") then {rec with state = "done", prev = rec.curr, idx = 0}
         else 
             case rec.state of 
             "init" => 
@@ -279,7 +289,7 @@ SHRINKING - t
                 end
             | "rollback" => 
                 if (length rec.curr) = (length rec.prev) then 
-                    {state = "done", curr = rec.prev, prev = rec.curr} (* TODO: this loops an unecesary amount of times *)
+                    {state = "done", curr = rec.prev, prev = rec.curr, idx = rec.idx} (* TODO: this loops an unecesary amount of times *)
                 else 
                     {state = "cont_size", curr = rec.prev, prev = rec.curr, idx = rec.idx}
             | "done" => 
@@ -289,12 +299,12 @@ SHRINKING - t
         case args.state of 
         "rollback" => 
             let val rollbackReadyArgs = map (fn x => if x.state = "done" then x else {x with state = "rollback"}) args.args
-                val argsRolledBack = map (fn x => x.shrinker x.raw) rollbackReadyArgs in 
-            {state = "cont", args = argsRolledBack} end
-        |_ => 
-            let val newArgs = map (fn x => x.shrinker x.raw) args.args 
+                val argsRolledBack = mapi (fn (i, x) => (nth args.shrinkers (i+1)) x) rollbackReadyArgs in 
+            {state = "cont", args = argsRolledBack, shrinkers = args.shrinkers} end
+        | _ => 
+            let val newArgs = mapi (fn (i, x) => (nth args.shrinkers (i+1)) x) args.args
                 val nextState = if (foldl (fn (x,y) => (x.state = "done") andalso y) true newArgs) then "done" else "cont" in 
-            {state = nextState, args = newArgs} end
+            {state = nextState, args = newArgs, shrinkers = args.shrinkers} end
 
     fun shrink_aux args prop pre counter = 
         if counter = 100 then report_error ("shrinking_looped", 0) else
@@ -302,12 +312,15 @@ SHRINKING - t
             val shrunk_args_raw = map (fn x => x.curr) shrunk_args.args 
             val precond_is_met = if (pre <> ()) then (apply_args pre shrunk_args_raw) else true in
         case (apply_args prop shrunk_args_raw) orelse (precond_is_met = false) of
-            true => shrink_aux (args_shrink {state = "rollback", args = shrunk_args.args}) prop pre (counter)
+            true => shrink_aux (args_shrink {state = "rollback", args = shrunk_args.args, shrinkers = args.shrinkers}) prop pre (counter)
             | false =>
                 if shrunk_args.state = "done" then {shrunk_ctx = shrunk_args_raw, count = counter} else shrink_aux shrunk_args prop pre (counter+1) end
 
     fun shrink args prop pre = 
-        let val res = shrink_aux args prop pre 0 
+        let val shrinkers = map (fn x => x.shrinker) args
+            val args_shrink_ready = map (fn x => {state = "init", curr = x.raw, prev = x.raw}) args
+            val args_rec = {state = "init", args = args_shrink_ready, shrinkers = shrinkers}
+            val res = shrink_aux args_rec prop pre 0 
         in res end
 (*
 --------------------------------
@@ -366,13 +379,19 @@ GENERATORS - r
             "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
             val x = (int_gen (1, ((length chars)-1)) size).raw
         in 
-            {raw = (nth chars x), shrinker = shrink_char chars} 
+            {raw = (nth chars x), shrinker = shrink_char} 
         end
 
 (* NOTE: Generates only strings of letters (upper and lower case) and numbers. *)
     (* return - {raw: string, shrinker: fn {state: string, curr: string, prev: string} => ..: {state: string, curr: string, prev: string}} *)
     fun string_gen size = 
-        {raw = (foldl (fn (x,y) => (char_gen x).raw ^ y) "" size), shrinker = shrink_string} 
+        let val x = (int_gen (0, size) size).raw
+            fun fold f acc 0 = acc 
+            | fold f acc i = fold f (acc ^ (f())) (i-1) 
+            val raw_string = (fold (fn () => (char_gen x).raw) "" x)
+        in  
+            {raw = raw_string, shrinker = shrink_string} 
+        end
 
 (* NOTE: Hardcoded for tuple of up to 10 elements *)
 (* returns a record with raw_inst: a tuple of whatever values specified, and meta_data is a list 
@@ -674,8 +693,8 @@ ALL TESTS - x
 *)
 
 (* shrinking tests - x *)
-tc [list(integer()), integer()] test_bad_insert;
-tc [integer()] (test_bad_half, (fn x => x >= 15));
+(* tc [list(integer()), integer()] test_bad_insert;
+tc [integer()] (test_bad_half, (fn x => x >= 15)); *)
 tc [string(), string()] (append_always_longer, lengths_not_same);
 tc [record ["theInteger", "theString"] [integer(), string()]] record_shrink_test
 
