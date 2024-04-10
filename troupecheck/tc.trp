@@ -110,7 +110,7 @@ UTILS - e
                 |_ => (2, 3, 4, 5) 
 (* 
 --------------------------------
-SHRINKING - t
+SHRINKING - r
 -------------------------------- 
 *)  
     
@@ -170,7 +170,6 @@ SHRINKING - t
                 res 
             end
         end
-
         
     and shrink_char rec = 
         let val chars = 
@@ -200,79 +199,49 @@ SHRINKING - t
             end
         end
 
-
-    and shrink_rec names vals rec = 
+    and shrink_sized_aggregate vals builder rec =
         case rec.state of 
-            "rollback" =>
-                let val init_idx_to_shrink = rec.idx_to_shrink
-                    fun rollback_aux (i, x) = 
-                        if i = init_idx_to_shrink then
-                            (let val val_to_shrink = {(nth rec.next_shrink_info (i+1)) with state = "rollback"}
-                            in 
-                                x.shrinker val_to_shrink 
-                            end )
-                            else (nth rec.next_shrink_info (i+1)) 
-                    val args_rolled_back = mapi rollback_aux vals
-                    val new_raw_vals = map (fn x => x.curr) args_rolled_back
-                    val new_state = if (foldl (fn (x,y) => (x.state = "done") andalso y) true args_rolled_back) then "done" else "cont"
-                    val idx_to_shrink = if (nth args_rolled_back (init_idx_to_shrink+1)).state = "done" then init_idx_to_shrink+1 else init_idx_to_shrink
-                in 
-                    {state = new_state, curr = (build_record names new_raw_vals), prev = rec.curr, next_shrink_info = args_rolled_back, idx_to_shrink = idx_to_shrink}
-                end
-            | "init" => 
-                let val init_idx_to_shrink = 0
-                    val new_vals = mapi (fn (i, x) => 
-                                            if i = init_idx_to_shrink then (x.shrinker {state = "init", curr = x.raw, prev = x.raw}) 
-                                            else {state = "init", curr = x.raw, prev = x.raw}) vals
-                    val new_raw_vals = map (fn x => x.curr) new_vals
-                    val new_state = if (foldl (fn (x,y) => (x.state = "done") andalso y) true new_vals) then "done" else "cont"
-                    val idx_to_shrink = if (nth new_vals (init_idx_to_shrink+1)).state = "done" then init_idx_to_shrink+1 else init_idx_to_shrink
-                in 
-                    {state = new_state, curr = (build_record names new_raw_vals), prev = rec.curr, next_shrink_info = new_vals, idx_to_shrink = idx_to_shrink}
-                end
-
-            | "done" => 
-                rec
-            | _ => 
-                let val init_idx_to_shrink = rec.idx_to_shrink
-                    val new_vals = mapi (fn (i, x) => 
-                                            if i = init_idx_to_shrink then x.shrinker (nth rec.next_shrink_info (i+1)) 
-                                            else (nth rec.next_shrink_info (i+1))) vals
-                    val new_raw_vals = map (fn x => x.curr) new_vals
-                    val new_state = if (foldl (fn (x,y) => (x.state = "done") andalso y) true new_vals) then "done" else "cont"
-                    val idx_to_shrink = if (nth new_vals (init_idx_to_shrink+1)).state = "done" then init_idx_to_shrink+1 else init_idx_to_shrink
-                in 
-                    {state = new_state, curr = (build_record names new_raw_vals), prev = rec.curr, next_shrink_info = new_vals, idx_to_shrink = idx_to_shrink}
-                end
-
-    (* input - vals: list, rec: {state: string, curr: tuple, prev: tuple} 
-    returns - {state: string, curr: tuple, prev: tuple, next_shrink_info: list} *)
-    and shrink_tuple shrinkers rec = 
-        case rec.state of 
-        "done" => 
-            rec 
-        | "rollback" => 
-            let val args_rolled_back = mapi (fn (i, x) => x {state = "rollback", curr = rec.curr.i, prev = rec.prev.i}) shrinkers
-                val new_raw_vals = map (fn x => x.curr) args_rolled_back
-                val new_state = if (foldl (fn (x,y) => (x.state = "done") andalso y) true args_rolled_back) then "done" else "cont"
-            in 
-                {state = new_state, curr = (build_tuple new_raw_vals), prev = rec.curr, next_shrink_info = args_rolled_back}
-            end
-        | "init" =>
-            let val new_vals = mapi (fn (i, x) => x {state = "init", curr = rec.curr.i, prev = rec.prev.i}) shrinkers
+        "init" => 
+            let val init_shrink_idx = 0
+                val new_vals = mapi (fn (i, x) => 
+                                        if i = init_shrink_idx then (x.shrinker {state = "init", curr = x.raw, prev = x.raw}) 
+                                        else {state = "init", curr = x.raw, prev = x.raw}) vals
                 val new_raw_vals = map (fn x => x.curr) new_vals
                 val new_state = if (foldl (fn (x,y) => (x.state = "done") andalso y) true new_vals) then "done" else "cont"
+                val shrink_idx = if (nth new_vals (init_shrink_idx+1)).state = "done" then init_shrink_idx+1 else init_shrink_idx
             in 
-                {state = new_state, curr = (build_tuple new_raw_vals), prev = rec.curr, next_shrink_info = new_vals}
+                {state = new_state, curr = (builder new_raw_vals), prev = rec.curr, next_shrink_info = new_vals, shrink_idx = shrink_idx}
             end
         | "cont" =>
-            let val new_vals = mapi (fn (i, x) => x (nth rec.next_shrink_info (i+1))) shrinkers
+            let val init_shrink_idx = rec.shrink_idx
+                val new_vals = mapi (fn (i, x) => 
+                                        if i = init_shrink_idx then x.shrinker (nth rec.next_shrink_info (i+1)) 
+                                        else (nth rec.next_shrink_info (i+1))) vals
                 val new_raw_vals = map (fn x => x.curr) new_vals
                 val new_state = if (foldl (fn (x,y) => (x.state = "done") andalso y) true new_vals) then "done" else "cont"
+                val shrink_idx = if (nth new_vals (init_shrink_idx+1)).state = "done" then init_shrink_idx+1 else init_shrink_idx
             in 
-                {state = new_state, curr = (build_tuple new_raw_vals), prev = rec.curr, next_shrink_info = new_vals}
+                {state = new_state, curr = (builder new_raw_vals), prev = rec.curr, next_shrink_info = new_vals, shrink_idx = shrink_idx}
             end
-    
+        | "done" => 
+            rec 
+        | "rollback" =>
+            let val init_shrink_idx = rec.shrink_idx
+                fun rollback_aux (i, x) = 
+                    if i = init_shrink_idx then
+                        (let val val_to_shrink = {(nth rec.next_shrink_info (i+1)) with state = "rollback"}
+                        in 
+                            x.shrinker val_to_shrink 
+                        end )
+                        else (nth rec.next_shrink_info (i+1)) 
+                val rollback_args = mapi rollback_aux vals
+                val new_raw_vals = map (fn x => x.curr) rollback_args
+                val new_state = if (foldl (fn (x,y) => (x.state = "done") andalso y) true rollback_args) then "done" else "cont"
+                val shrink_idx = if (nth rollback_args (init_shrink_idx+1)).state = "done" then init_shrink_idx+1 else init_shrink_idx
+            in 
+                {state = new_state, curr = (builder new_raw_vals), prev = rec.curr, next_shrink_info = rollback_args, shrink_idx = shrink_idx}
+            end
+
     and shrink_list shrinkers rec  = 
         if (rec.curr = []) andalso (rec.state <> "rollback") then {rec with state = "done", prev = rec.curr, idx = 0}
         else 
@@ -347,7 +316,7 @@ SHRINKING - t
         in res end
 (*
 --------------------------------
-GENERATORS - r
+GENERATORS - t
 -------------------------------- 
 *)  
     (* return - {raw: bool, shrinker: fn {state: string, curr: bool, prev: bool} => ..: {state: string, curr: bool, prev: bool}} *)
@@ -424,7 +393,7 @@ GENERATORS - r
             val ts_raw_vals = map (fn x => x.raw) ts_vals 
             val ts_shrinkers = map (fn x => x.shrinker) ts_vals
         in
-            {raw = (build_tuple ts_raw_vals), shrinker = shrink_tuple ts_shrinkers} 
+            {raw = (build_tuple ts_raw_vals), shrinker = shrink_sized_aggregate ts_vals build_tuple} 
         end
 
 (* 
@@ -441,7 +410,7 @@ Returns record: {raw_inst = <<actual result record>>, meta_data = (ns, <<list of
                 val ts_raw_vals = map (fn x => x.raw) ts_vals  
                 val raw_res = build_record ns ts_raw_vals 
             in
-                {raw = raw_res, shrinker = shrink_rec ns ts_vals}
+                {raw = raw_res, shrinker = shrink_sized_aggregate ts_vals (build_record ns)}
             end 
 
 
