@@ -309,28 +309,38 @@ SHRINKING - t
     and args_shrink args = 
         case args.state of 
         "rollback" => 
-            let val rollbackReadyArgs = map (fn x => if x.state = "done" then x else {x with state = "rollback"}) args.args
-                val argsRolledBack = mapi (fn (i, x) => (nth args.shrinkers (i+1)) x) rollbackReadyArgs in 
-            {state = "cont", args = argsRolledBack, shrinkers = args.shrinkers} end
+            let val init_shrink_idx = args.shrink_idx
+                val rollbackReadyArgs = mapi (fn (i, x) => if (x.state = "done") orelse (i<>init_shrink_idx) then x else {x with state = "rollback"}) args.args
+                val argsRolledBack = mapi (fn (i, x) => if i = init_shrink_idx then (nth args.shrinkers (i+1)) x else x) rollbackReadyArgs 
+                val nextState = if (foldl (fn (x,y) => (x.state = "done") andalso y) true argsRolledBack) then "done" else "cont" 
+                val shrink_idx = if (nth argsRolledBack (init_shrink_idx+1)).state = "done" then init_shrink_idx+1 else init_shrink_idx
+            in
+                {state = nextState, args = argsRolledBack, shrinkers = args.shrinkers, shrink_idx = shrink_idx} 
+            end
         | _ => 
-            let val newArgs = mapi (fn (i, x) => (nth args.shrinkers (i+1)) x) args.args
-                val nextState = if (foldl (fn (x,y) => (x.state = "done") andalso y) true newArgs) then "done" else "cont" in 
-            {state = nextState, args = newArgs, shrinkers = args.shrinkers} end
+            let val init_shrink_idx = args.shrink_idx
+                val newArgs = mapi (fn (i, x) => if i = init_shrink_idx then (nth args.shrinkers (i+1)) x else x) args.args
+                val nextState = if (foldl (fn (x,y) => (x.state = "done") andalso y) true newArgs) then "done" else "cont" 
+                val shrink_idx = if (nth newArgs (init_shrink_idx+1)).state = "done" then init_shrink_idx+1 else init_shrink_idx
+
+            in 
+                {state = nextState, args = newArgs, shrinkers = args.shrinkers, shrink_idx = shrink_idx} 
+            end
 
     fun shrink_aux args prop pre counter = 
         if counter = 100 then report_error ("shrinking_looped", 0) else
-        let val shrunk_args = args_shrink args  
+        let val shrunk_args = args_shrink args 
             val shrunk_args_raw = map (fn x => x.curr) shrunk_args.args 
             val precond_is_met = if (pre <> ()) then (apply_args pre shrunk_args_raw) else true in
         case (apply_args prop shrunk_args_raw) orelse (precond_is_met = false) of
-            true => shrink_aux (args_shrink {state = "rollback", args = shrunk_args.args, shrinkers = args.shrinkers}) prop pre (counter)
+            true => shrink_aux (args_shrink {state = "rollback", args = shrunk_args.args, shrinkers = args.shrinkers, shrink_idx = args.shrink_idx}) prop pre (counter)
             | false =>
                 if shrunk_args.state = "done" then {shrunk_ctx = shrunk_args_raw, count = counter} else shrink_aux shrunk_args prop pre (counter+1) end
 
     fun shrink args prop pre = 
-        let val shrinkers = map (fn x => x.shrinker) args
+        let val shrinkers = map (fn x => x.shrinker) args 
             val args_shrink_ready = map (fn x => {state = "init", curr = x.raw, prev = x.raw}) args
-            val args_rec = {state = "init", args = args_shrink_ready, shrinkers = shrinkers}
+            val args_rec = {state = "init", args = args_shrink_ready, shrinkers = shrinkers, shrink_idx = 0}
             val res = shrink_aux args_rec prop pre 0 
         in res end
 (*
