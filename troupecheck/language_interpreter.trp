@@ -154,6 +154,28 @@ let fun eval exp env =
                 {raw = res.raw, shrinker = res.shrinker} end
         end 
     
+    fun assign_in_use_aux stm_or_exp assign idx = 
+        case stmt_or_exp.0 of 
+        "print" => 
+            assign_in_use_aux stmt_or_exp.1 assign idx
+        | "assign" => 
+            assign_in_use_aux stmt_or_exp.2 assign idx 
+        | "var" => if stm_or_exp.1 = assign then true else false
+        | "num" => false
+        | _ => 
+            if assign_in_use stmt_or_exp.1 assign idx then 
+                true
+            else assign_in_use_aux stm_or_exp.2 assign idx
+
+    fun assign_in_use [] idxs assign idx bool = bool 
+        | assign_in_use (x::xs) idxs assign idx bool = 
+            let val res = assign_in_use_aux x assign (length (x::xs)) idx in 
+            if res then assign_in_use xs (append [idx] idxs) assign idx+1 true 
+            else assign_in_use xs idxs assign idx+1 bool
+
+        
+
+
     fun program_gen size = 
         let val num_of_insts = int_gen(0, size) size 
             fun prog_gen_aux env p 0 = p 
@@ -164,7 +186,27 @@ let fun eval exp env =
                     prog_gen_aux newEnv (append [stmt.raw] p) (append [stmt.shrinker] s) (i-1)
                 end 
             val (prog, shrinkers) = prog_gen_aux [] [] [] num_of_insts
-            fun shrinker inst = inst (* DUMMY function - needs to be fixed *)  
+            fun shrinker inst = 
+                case inst.state of 
+                "init" => 
+                    let val shrunk = shrink_list shrinkers inst 
+                    in shrunk end 
+                | "cont_size" => 
+                    let val next_elem = inst.curr[inst.idx-1] 
+                    in
+                        if next_elem.0 = "assign" then 
+                            if (assign_in_use(next_elem.1)).0 then 
+                                {inst with idx = inst.idx-1} 
+                            else 
+                                shrink_list shrinkers inst 
+                        else 
+                            shrink_list shrinkers inst 
+                    end
+                | _ => 
+                    shrink_list shrinkers inst 
+
+                            
+                    
         in 
             {raw = prog, shrinker = shrinker}
         end
