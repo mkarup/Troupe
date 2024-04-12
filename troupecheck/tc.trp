@@ -260,7 +260,6 @@ SHRINKING - r
                     {state = next_state, curr = new_list, prev = rec.curr, idx = remove_idx} 
                 end
             | "cont_elem" => 
-                (* TODO: give list of shrinkers in the list_gen rec.curr should be list of raw elements *)
                 let val interim_list = mapi (fn (i, x) => (nth shrinkers (i+1)){state = "init", curr = x, prev = x}) rec.curr
                     val next_state = if (foldl (fn (x,y) => (x.state = "done") andalso y) true interim_list) then "done" else "cont_elem"
                     val new_list = map (fn x => x.curr) interim_list 
