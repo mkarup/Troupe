@@ -1,0 +1,174 @@
+import lists
+(* Program: statement list
+    Statement: ("assign", var, exp) | ("print", exp) *)
+
+let fun eval exp env =
+    case exp of
+      ("num", n) => n
+    | ("var", n) => lookup env n ("unknown variable " ^ n)
+    | ("add", e1, e2) => (eval e1 env) + (eval e2 env)
+    | ("sub", e1, e2) => (eval e1 env) - (eval e2 env)
+    | ("mul", e1, e2) => (eval e1 env) * (eval e2 env)
+    | ("div", e1, e2) => (eval e1 env) / (eval e2 env)
+    | _ => print ("Error: ill defined expression: "); exit (authority, 1)
+
+    fun execute stmt env =
+        case stmt of
+        ("assign", var, exp) =>
+            let val value = eval exp env
+            in
+                append [(var, value)] env
+            end
+        | ("print", exp) => (print (toString (eval exp env)); env)
+
+    fun interpret stmts =
+        let fun interpretHelper [] env = env
+            | interpretHelper (stmt :: rest) env =
+                let val newEnv = execute stmt env
+                in
+                    interpretHelper rest newEnv
+                end
+        in
+            (interpretHelper stmts [])
+        end
+
+    val statements = [
+        ("assign", "x", ("num", 5)),
+        ("assign", "y", ("num", 7)),
+        ("print", ("var", "x")),
+        ("print", ("var", "y")),
+        ("print", ("add", ("var", "x"), ("var", "y")))
+    ] 
+    
+    fun one_of ls = 
+        let val idx = (int_gen (1, (length ls)) ((length ls))).raw
+        in 
+            nth ls idx
+        end
+
+    fun exp_gen ls size = 
+        let val exp_ts = ["num", "var", "add", "sub", "mul", "div"]
+            val exp_type_interim = one_of exp_ts
+            val exp_type = if (exp_type_interim = "var") andalso (length ls = 0) then "num" else "var"
+        in 
+            case exp_type of 
+            "num" => 
+                let val value = int_gen(inf, inf) size 
+                    fun shrinker inst = 
+                        let shrunk_val = value.shrinker {state = inst.state, curr = inst.curr.1, prev = inst.prev.1} in 
+                        {state = shrunk_val.state, curr = ("num", shrunk_val.curr), prev = ("num", shrunk_val.prev)} end in
+                {raw = ("num", value.raw), shrinker = shrinker} end
+            | "var" => 
+                let val value = one_of ls size 
+                    fun shrinker inst = 
+                        {inst with state = "done"} in
+                {raw = ("var", value), shrinker = shrinker} end 
+            |"add" => 
+                let val e1 = exp_gen ls size 
+                    val e2 = exp_gen ls size
+                    fun shrinker inst = 
+                        let val shrunk_e1 = e1.shrinker {state = inst.state, curr = inst.curr, prev = inst.prev}
+                            val shrunk_e2 = e2.shrinker {state = inst.state, curr = inst.curr, prev = inst.prev}
+                            val next_state = if shrunk_e1.state = "done" then e2.state else e1.state 
+                        in 
+                            {state = next_state, curr = ("add", shrunk_e1.raw, shrunk_e2.raw), prev = inst.prev}
+                        end 
+                in
+                    {raw = ("add", e1.raw, e2.raw), shrinker = shrinker} 
+                end
+            |"sub" => 
+                let val e1 = exp_gen ls size 
+                    val e2 = exp_gen ls size
+                    fun shrinker inst = 
+                        let val shrunk_e1 = e1.shrinker {state = inst.state, curr = inst.curr, prev = inst.prev}
+                            val shrunk_e2 = e2.shrinker {state = inst.state, curr = inst.curr, prev = inst.prev}
+                            val next_state = if shrunk_e1.state = "done" then e2.state else e1.state 
+                        in 
+                            {state = next_state, curr = ("sub", shrunk_e1.raw, shrunk_e2.raw), prev = inst.prev}
+                        end 
+                in
+                    {raw = ("sub", e1.raw, e2.raw), shrinker = shrinker} 
+                end
+            |"mul" => 
+                let val e1 = exp_gen ls size 
+                    val e2 = exp_gen ls size
+                    fun shrinker inst = 
+                        let val shrunk_e1 = e1.shrinker {state = inst.state, curr = inst.curr, prev = inst.prev}
+                            val shrunk_e2 = e2.shrinker {state = inst.state, curr = inst.curr, prev = inst.prev}
+                            val next_state = if shrunk_e1.state = "done" then e2.state else e1.state 
+                        in 
+                            {state = next_state, curr = ("mul", shrunk_e1.raw, shrunk_e2.raw), prev = inst.prev}
+                        end 
+                in
+                    {raw = ("mul", e1.raw, e2.raw), shrinker = shrinker} 
+                end
+            |"div" => 
+                let val e1 = exp_gen ls size 
+                    val e2 = exp_gen ls size
+                    fun shrinker inst = 
+                        let val shrunk_e1 = e1.shrinker {state = inst.state, curr = inst.curr, prev = inst.prev}
+                            val shrunk_e2 = e2.shrinker {state = inst.state, curr = inst.curr, prev = inst.prev}
+                            val next_state = if shrunk_e1.state = "done" then e2.state else e1.state 
+                        in 
+                            {state = next_state, curr = ("div", shrunk_e1.raw, shrunk_e2.raw), prev = inst.prev}
+                        end 
+                in
+                    {raw = ("div", e1.raw, e2.raw), shrinker = shrinker} 
+                end  
+        end
+    
+    fun assign_stmt_gen ls size = 
+        let val n = string_gen size 
+            val exp = exp_gen ls size 
+            fun shrinker inst = 
+                let val shrunk_exp = exp.shrinker {state = inst.state, curr = inst.curr.2, prev = inst.prev.2}
+                    val shrunk_assign = ("assign", n, shrunk_exp.curr)
+                in  
+                    {state = shrunk_exp.state, curr = shrunk_assign, prev = inst.curr}
+                end
+        in
+            {raw = ("assign", n, exp.raw), shrinker = shrinker} 
+        end 
+    
+    fun print_stmt_gen ls size = 
+        let val exp = exp_gen ls size 
+            fun shrinker inst =
+                let val shrunk_exp = exp.shrinker {state = inst.state, curr = inst.curr.2, prev = inst.prev.2}
+                    val shrunk_print = ("print", shrunk_exp.curr)
+                in 
+                    {state = shrunk_exp.state, curr = shrunk_print, prev = inst.curr}
+                end 
+        in 
+            {raw = ("print", exp.raw), shrinker = shrinker}
+        end 
+
+    fun stmt_gen ls size = 
+        let val stmt = one_of ["assign", "print"] 
+        in 
+            case stmt of
+            "assign" => 
+                let val res = assign_stmt_gen ls size in 
+                {raw = res.raw, shrinker = res.shrinker} end
+            |"print" => 
+                let val res = print_stmt_gen ls size in 
+                {raw = res.raw, shrinker = res.shrinker} end
+        end 
+    
+    fun program_gen size = 
+        let val num_of_insts = int_gen(0, size) size 
+            fun prog_gen_aux env p 0 = p 
+            | prog_gen_aux env p s i = (p,s) 
+                let val stmt = stmt_gen env size 
+                    val newEnv = if stmt.raw.0 = "assign" then append [stmt.raw.1] env else env
+                in 
+                    prog_gen_aux newEnv (append [stmt.raw] p) (append [stmt.shrinker] s) (i-1)
+                end 
+            val (prog, shrinkers) = prog_gen_aux [] [] [] num_of_insts
+            fun shrinker inst = inst (* DUMMY function - needs to be fixed *)  
+        in 
+            {raw = prog, shrinker = shrinker}
+        end
+
+        
+    in 
+interpret statements end
