@@ -250,27 +250,28 @@ SHRINKING - r
                 let val removeIdx = (length (rec.curr)) - 1
                     val newList = remove_nth removeIdx rec.curr 0 
                 in 
-                    {state = "cont_size", curr = newList, prev = rec.curr, idx = removeIdx} 
+                    {state = "cont_size", curr = newList, prev = rec.curr, idx = removeIdx, shrinkers = shrinkers} 
                 end
             | "cont_size" => 
-                let val remove_idx = (rec.idx - 1)
+                let val new_shrinkers = remove_nth rec.idx rec.shrinkers
+                    val remove_idx = (rec.idx - 1)
                     val next_state = if remove_idx <= 0 then "cont_elem" else "cont_size"
                     val new_list = remove_nth remove_idx rec.curr 0 
                 in  
-                    {state = next_state, curr = new_list, prev = rec.curr, idx = remove_idx} 
+                    {state = next_state, curr = new_list, prev = rec.curr, idx = remove_idx, shrinkers = new_shrinkers} 
                 end
             | "cont_elem" => 
-                let val interim_list = mapi (fn (i, x) => (nth shrinkers (i+1)){state = "init", curr = x, prev = x}) rec.curr
+                let val interim_list = mapi (fn (i, x) => (nth rec.shrinkers (i+1)){state = "init", curr = x, prev = x}) rec.curr
                     val next_state = if (foldl (fn (x,y) => (x.state = "done") andalso y) true interim_list) then "done" else "cont_elem"
                     val new_list = map (fn x => x.curr) interim_list 
                 in
-                    {state = next_state, curr = new_list, prev = rec.curr, idx = rec.idx} 
+                    {state = next_state, curr = new_list, prev = rec.curr, idx = rec.idx, shrinkers = shrinkers} 
                 end
             | "rollback" => 
                 if (length rec.curr) = (length rec.prev) then 
-                    {state = "done", curr = rec.prev, prev = rec.curr, idx = rec.idx} (* TODO: this loops an unecesary amount of times *)
+                    {state = "done", curr = rec.prev, prev = rec.curr, idx = rec.idx, shrinkers = rec.shrinkers} (* TODO: this loops an unecesary amount of times *)
                 else 
-                    {state = "cont_size", curr = rec.prev, prev = rec.curr, idx = rec.idx}
+                    {state = "cont_size", curr = rec.prev, prev = rec.curr, idx = rec.idx, shrinkers = rec.shrinkers}
             | "done" => 
                 rec
 
@@ -505,6 +506,12 @@ CONVENIENCE FUNCTIONS - s
     fun tuple ts = tuple_gen ts
     
     fun record ns ts = rec_gen ns ts
+
+    fun one_of ls = 
+    let val idx = (int_gen (1, (length ls)) ((length ls))).raw
+    in 
+        nth ls idx
+    end
         
     
 (* 
