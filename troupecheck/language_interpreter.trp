@@ -165,13 +165,16 @@ let fun eval exp env =
         | _ => 
             if assign_in_use stmt_or_exp.1 assign idx then 
                 true
-            else assign_in_use_aux stm_or_exp.2 assign idx
+            else 
+                assign_in_use_aux stm_or_exp.2 assign idx
 
     fun assign_in_use [] idxs assign idx bool = bool 
         | assign_in_use (x::xs) idxs assign idx bool = 
-            let val res = assign_in_use_aux x assign (length (x::xs)) idx in 
-            if res then assign_in_use xs (append [idx] idxs) assign idx+1 true 
-            else assign_in_use xs idxs assign idx+1 bool
+            let val res = assign_in_use_aux x assign (length (x::xs)) idx 
+            in 
+                if res then assign_in_use xs (append [idx] idxs) assign idx+1 true 
+                else assign_in_use xs idxs assign idx+1 bool 
+            end
 
         
 
@@ -203,14 +206,9 @@ let fun eval exp env =
                             shrink_list shrinkers inst 
                     end
                 | _ => 
-                    shrink_list shrinkers inst 
-
-                            
-                    
+                    shrink_list shrinkers inst                      
         in 
             {raw = prog, shrinker = shrinker}
         end
-
-        
-    in 
+in 
 interpret statements end
