@@ -55,7 +55,7 @@ let fun eval exp env =
             "num" => 
                 let val value = int_gen(inf, inf) size 
                     fun shrinker inst = 
-                        let shrunk_val = value.shrinker {state = inst.state, curr = inst.curr.1, prev = inst.prev.1} in 
+                        let val shrunk_val = value.shrinker {state = inst.state, curr = inst.curr.1, prev = inst.prev.1} in 
                         {state = shrunk_val.state, curr = ("num", shrunk_val.curr), prev = ("num", shrunk_val.prev)} end in
                 {raw = ("num", value.raw), shrinker = shrinker} end
             | "var" => 
@@ -181,8 +181,8 @@ let fun eval exp env =
 
     fun program_gen size = 
         let val num_of_insts = int_gen(0, size) size 
-            fun prog_gen_aux env p 0 = p 
-            | prog_gen_aux env p s i = (p,s) 
+            fun prog_gen_aux env p 0 = (p,s) 
+            | prog_gen_aux env p s i =  
                 let val stmt = stmt_gen env size 
                     val newEnv = if stmt.raw.0 = "assign" then append [stmt.raw.1] env else env
                 in 
@@ -211,4 +211,4 @@ let fun eval exp env =
             {raw = prog, shrinker = shrinker}
         end
 in 
-interpret statements end
+print (program_gen 50) end
