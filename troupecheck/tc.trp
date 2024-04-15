@@ -712,19 +712,23 @@ CUSTOM TYPE PROGRAM
             end
         | ("print", exp) => (print (toString (eval exp env)); env)
 
-    fun interpret stmts =
+    fun interpret prog =
         let fun interpretHelper [] env = env
             | interpretHelper (stmt :: rest) env =
                 let val newEnv = execute stmt env
                 in
                     interpretHelper rest newEnv
                 end
+            val stmts = remove_nth ((length prog)-1) prog 0
+            val exp = nth prog (length prog)
+            val last_env = (interpretHelper stmts [])
         in
-            (interpretHelper stmts [])
+            eval exp last_env
         end
     
     (* fun optimize_prog prog =
         let fun optimize_exp exp =
+                print "testing";
                 case exp of
                 ("num", n) => ("num", n)
                 | ("var", x) => ("var", x)
@@ -743,7 +747,7 @@ CUSTOM TYPE PROGRAM
                 | ("print", exp) => ("print", (optimize_exp exp))
         in
             map optimize_stmt prog
-        end *)
+        end  *)
 
     fun exp_gen ls nesting_level size = 
         let val exp_ts = if length ls = 0 then ["num", "add", "sub", "mul", "div"] else ["num", "var", "add", "sub", "mul", "div"]
@@ -811,7 +815,7 @@ CUSTOM TYPE PROGRAM
                             {state = next_state, curr = ("div", shrunk_e1.curr, shrunk_e2.curr), prev = inst.prev}
                         end 
                 in
-                    {raw = ("div", e1.raw, e2.raw), shrinker = shrinker} 
+                    {raw = ("div", e1.raw, e2.raw), shrinker = shrinker} (* maybe just shrinker? *)
                 end  
         end
     
@@ -876,14 +880,17 @@ CUSTOM TYPE PROGRAM
 
     fun program_gen size = 
         let val num_of_insts = (int_gen(0, size) size ).raw
-            fun prog_gen_aux env p s 0 = (p, s) 
+            fun prog_gen_aux env p s 0 = (p, s, env) 
             | prog_gen_aux env p s i = 
                 let val stmt = stmt_gen env size 
                     val newEnv = if stmt.raw.0 = "assign" then (append [stmt.raw.1] env) else env
                 in 
                     prog_gen_aux newEnv (append p [stmt.raw]) (append s [stmt.shrinker]) (i-1)
                 end 
-            val (prog, shrinkers) = prog_gen_aux [] [] [] num_of_insts
+            val (prog_stmts, shrinkers_interim, last_env) = prog_gen_aux [] [] [] num_of_insts
+            val last_exp = exp_gen last_env 0 size
+            val prog = append prog_stmts [last_exp.raw]
+            val shrinkers = append shrinkers_interim [last_exp.shrinker]
             fun shrinker inst = 
                 case inst.state of 
                 "init" => 
@@ -892,13 +899,17 @@ CUSTOM TYPE PROGRAM
                         shrunk 
                     end 
                 | "cont_size" => 
-                    let val next_elem = nth inst.curr (length inst.curr) (* TODO: goes wrong *)
+                    let val next_elem = nth inst.curr (length inst.curr) 
                     in  
                         if next_elem.0 = "assign" then 
                             if (assign_in_use inst.curr [] (next_elem.1) 0 false).0 then 
                                 print "testing";
                                 {inst with idx = inst.idx-1} 
-                            else 
+                            else if (next_elem.0 = "var") orelse (next_elem.0 = "num") orelse (next_elem.0 = "add") orelse (next_elem.0 = "sub") orelse
+                                    (next_elem.0 = "mul") orelse (next_elem.0 = "div") then
+                                {inst with idx = inst.idx-1} 
+
+                            else
                                 shrink_list shrinkers inst 
                         else 
                             shrink_list shrinkers inst 
@@ -922,7 +933,8 @@ ALL TESTS - x
 -------------------------------- 
 *)
 
-tc [program_gen] test_prog_shrink
+interpret (prog.raw)
+(* tc [program_gen] test_prog_shrink *)
 
 (* shrinking tests - x *)
 (* tc [list(integer()), integer()] test_bad_insert;
