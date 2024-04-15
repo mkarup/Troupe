@@ -1,0 +1,1 @@
+let val x = true in getType x end

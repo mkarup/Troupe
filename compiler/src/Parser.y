@@ -104,8 +104,8 @@ import Control.Monad.Except
 %nonassoc with
 %right '=>' 
 %right '|'
-%right ';'
 %right else 
+%right ';'
 %left andalso orelse
 %nonassoc '=' '<=' '>=' '<>' '<' '>' '@'
 %left andb orb xorb
