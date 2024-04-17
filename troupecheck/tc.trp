@@ -256,8 +256,9 @@ SHRINKING - r
                 let val removeIdx = (length (rec.curr)) - 1
                     val newList = remove_nth removeIdx rec.curr 0 
                     val new_shrinkers = remove_nth removeIdx shrinkers 0 
+                    val next_state = if length newList = 0 then "cont_elem" else "cont_size"
                 in 
-                    {state = "cont_size", curr = newList, prev = rec.curr, idx = removeIdx, shrinkers = new_shrinkers, prev_shrinkers = shrinkers} 
+                    {state = next_state, curr = newList, prev = rec.curr, idx = removeIdx, shrinkers = new_shrinkers, prev_shrinkers = shrinkers} 
                 end
             | "cont_size" => 
                 let val remove_idx = (rec.idx - 1)
@@ -726,28 +727,45 @@ CUSTOM TYPE PROGRAM
             eval exp last_env
         end
     
-    (* fun optimize_prog prog =
-        let fun optimize_exp exp =
-                print "testing";
+    fun optimize_prog prog =
+        let val stmts = remove_nth ((length prog)-1) prog 0
+            val exp = nth prog (length prog)
+            fun optimize_exp exp =
                 case exp of
                 ("num", n) => ("num", n)
                 | ("var", x) => ("var", x)
-                | ("add", ("num", n1), ("num", n2)) => ("num", (n1 + n2))
-                | ("sub", ("num", n1), ("num", n2)) => ("num", (n1 - n2))
-                | ("mul", ("num", n1), ("num", n2)) => ("num", (n1 * n2))
-                | ("div", ("num", n1), ("num", n2)) => ("num", (n1 / n2))
-                | ("add", e1, e2) => ("add", (optimize_exp e1), (optimize_exp e2))
-                | ("sub", e1, e2) => ("sub", (optimize_exp e1), (optimize_exp e2))
-                | ("mul", e1, e2) => ("mul", (optimize_exp e1), (optimize_exp e2))
-                | ("div", e1, e2) => ("div", (optimize_exp e1), (optimize_exp e2))
+                | ("add", e1, e2) => 
+                    (case e1 of 
+                    ("num", n1) => (case e2 of 
+                                    ("num", n2) => ("num", (n1+n2))
+                                    |_ => ("add", (optimize_exp e1), (optimize_exp e2)))
+                    | _ => ("add", (optimize_exp e1), (optimize_exp e2)))
+                | ("sub", e1, e2) => 
+                    (case e1 of 
+                    ("num", n1) => (case e2 of 
+                                    ("num", n2) => ("num", (n1-n2))
+                                    |_ => ("sub", (optimize_exp e1), (optimize_exp e2)) )
+                    |_ => ("sub", (optimize_exp e1), (optimize_exp e2)))
+                | ("mul", e1, e2) => 
+                    (case e1 of 
+                    ("num", n1) => (case e2 of 
+                                    ("num", n2) => ("num", (n1*n2))
+                                    |_ => ("mul", (optimize_exp e1), (optimize_exp e2)) )
+                    |_ => ("mul", (optimize_exp e1), (optimize_exp e2)))
+                | ("div", e1, e2) => 
+                    (case e1 of 
+                    ("num", n1) => (case e2 of 
+                                    ("num", n2) => if ((n1 = 0) andalso (n2 = 0)) then ("div", e1, e2) else ("num", (n1/n2))
+                                    |_ => ("div", (optimize_exp e1), (optimize_exp e2)) )
+                    |_ => ("div", (optimize_exp e1), (optimize_exp e2)))
 
             fun optimize_stmt stmt =
                 case stmt of
                 ("assign", var, exp) => ("assign", var, (optimize_exp exp))
                 | ("print", exp) => ("print", (optimize_exp exp))
         in
-            map optimize_stmt prog
-        end  *)
+            append (map optimize_stmt stmts) [optimize_exp exp]
+        end 
 
     fun exp_gen ls nesting_level size = 
         let val exp_ts = if length ls = 0 then ["num", "add", "sub", "mul", "div"] else ["num", "var", "add", "sub", "mul", "div"]
@@ -920,11 +938,11 @@ CUSTOM TYPE PROGRAM
             {raw = prog, shrinker = shrinker}
         end
     
-    fun test_prog_shrink prog = 
-        (interpret prog) = []
+    fun test_prog_opt prog = 
+        (interpret prog) = (interpret (optimize_prog prog))
     val exp = exp_gen [] 0 3
     val stmt = stmt_gen [] 3
-    val prog = program_gen 10
+    val prog = program_gen 2
 in
 
 (*
@@ -932,9 +950,7 @@ in
 ALL TESTS - x
 -------------------------------- 
 *)
-
-interpret (prog.raw)
-(* tc [program_gen] test_prog_shrink *)
+tc [program_gen] test_prog_opt 
 
 (* shrinking tests - x *)
 (* tc [list(integer()), integer()] test_bad_insert;
