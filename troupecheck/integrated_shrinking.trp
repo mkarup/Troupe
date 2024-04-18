@@ -1,0 +1,1024 @@
+import lists  
+(* 
+--------------------------------
+PRINTING TO CONSOLE - q
+-------------------------------- 
+*)
+let val out = getStdout authority
+    fun write x = fwrite (out, x)
+    (* arguments are always in a list - for easier readability these are removed when converting arguments to string *)
+    fun args_toString args = 
+        let fun aux_toString acc (x0::x1::xs) = aux_toString (acc ^ (toString x0) ^ ", ") (x1::xs)
+            | aux_toString acc (x::xs) = acc ^ (toString x) in 
+        aux_toString "" args end
+(* 
+--------------------------------
+ERROR HANDLING - w
+-------------------------------- 
+*)
+    fun report_error error_reason = 
+        write "\u001B[31m \nError: "; (* Changing the print color to red *)
+        let val err_string = case error_reason of 
+            ("cant_generate", tries) => "Couldn't produce an instance that satisfies all strict constraints after "
+                                            ^ (toString tries) ^ " tries.\n"
+            | ("cant_satisfy", tries) => "No valid test could be generated after " ^ (toString tries) ^ " tries.\n"
+            | ("non_boolean_result", _) => "The property or precondition code returned a non-boolean result.\n"
+            | ("type_mismatch", _) => "The types' structure doesn't match the property.\n"
+            | ("illegal_gen_def", _ ) => "Generator is defined wrong - use tuple() or record() to combine generators.\n"
+            | ("record_mismatch", _) => "the number of names provided for record generation, does not match the number of types provided.\n"
+            | ("shrinking_looped", _) => "Shrinking looped.\n"
+            | ("non_string_type", _) => "An element of non-string type found when trying to convert list to string.\n"
+        in
+        write (err_string ^ "\u001B[0m"); (* Changing the color back *)
+        exit (authority, 0) end
+    
+    fun boolean_check x = 
+        if (getType x)<>"boolean" then report_error ("non_boolean_result", 0) else ()
+
+    fun function_not_done_check p = 
+        if (getType p)<>"function" then report_error ("type_mismatch", 0) else ()
+(*
+--------------------------------
+UTILS - e
+-------------------------------- 
+*)  
+    fun remove_nth n [] i = []
+    | remove_nth n (x::xs) i = 
+        if n = i then xs
+        else x :: (remove_nth n xs (i + 1))
+    
+    fun make_list (f, i) = 
+    case i of 
+    0 => []
+    | _ => append [f()] (make_list (f, i-1))
+    
+    fun abs_value x = 
+    if x < 0 then -x else x 
+
+(* applies the list of arguments to the property - one by one - reporting errors along the way *)
+(* TODO: handle when arguments are passed to a property that does not take arguments *)
+    fun apply_args p l =
+        case l of 
+            [] => boolean_check (p()); p() (* this case is only reached if there are no generators to beign with*)
+            | (x::xs) => 
+                let val res = foldl (fn (x,y) => function_not_done_check y; y x) p l in
+                boolean_check res;
+                res 
+                end
+    
+    fun string_to_list s = 
+        let fun aux "" acc = acc 
+            | aux s acc = 
+                let val x = substring (s, 0, 1)
+                    val xs = substring (s, 1, 1/0) in 
+                aux xs (append acc [x]) end in 
+        aux s [] end
+    
+    fun list_to_string ls = 
+        foldl (fn (x,y) => if getType x <> "string" then report_error ("non_string_type", 0) else y ^ x) "" ls
+    
+    fun string_length s = 
+        length (string_to_list s)
+
+    fun report_fail_reason rec noOfTests= 
+        case rec.failReason of
+            "false_prop" => 
+                write "\nFailure at input: ";
+                write (args_toString rec.ctx);
+                write ("\nAfter running: " ^ (toString (noOfTests - rec.remTests + 1)) ^ " test(s)\n")
+    
+    fun build_record names vals = 
+        let fun aux r [] [] = r 
+            | aux r (n::ns) (v::vs) = 
+                aux (recordExtend(r, n, v)) ns vs in
+        aux {} names vals 
+        end
+    
+    fun build_tuple ls = 
+                case ls of 
+                [] => (0)
+                |[x] => (x) 
+                |[x1,x2] => (x1,x2)
+                |[x1,x2,x3] => (x1,x2,x3)
+                |[x1,x2,x3,x4] => (x1,x2,x3,x4)
+                |[x1,x2,x3,x4,x5] => (x1,x2,x3,x4,x5)
+                |[x1,x2,x3,x4,x5,x6] => (x1,x2,x3,x4,x5,x6)
+                |[x1,x2,x3,x4,x5,x6,x7] => (x1,x2,x3,x4,x5,x6,x7)
+                |[x1,x2,x3,x4,x5,x6,x7,x8] => (x1,x2,x3,x4,x5,x6,x7,x8)
+                |[x1,x2,x3,x4,x5,x6,x7,x8,x9] => (x1,x2,x3,x4,x5,x6,x7,x8,x9)
+                |[x1,x2,x3,x4,x5,x6,x7,x8,x9,x10] => (x1,x2,x3,x4,x5,x6,x7,x8,x9,x10)
+                |_ => (2, 3, 4, 5) 
+(* 
+--------------------------------
+SHRINKING - r
+-------------------------------- 
+*)  
+    
+    and shrink_float 0 = [0]
+        | shrink_float n = 
+        let val current = floor ((abs_value n) / 2)
+            fun ret_fun () = [n-current, fn () => shrink_float (floor(current/2))] in 
+        [0, ret_fun] end
+    
+    and shrink_int rec = 
+        let val interim = shrink_float rec 
+        in 
+        {interim with curr = floor(interim.curr)} 
+        end
+    
+    and shrink_bool rec = 
+        let val rec_checked = if rec.curr = false then {rec with state = "done"} else rec 
+        in 
+        case rec_checked.state of 
+        "rollback" => 
+            {state = "done", curr = rec_checked.prev, prev = rec_checked.curr}
+        |"done" => 
+            rec_checked
+        | _ => 
+            let val newVal = false  
+            in
+            {state = "cont", curr = newVal, prev = rec_checked.curr} 
+            end 
+        end
+    
+    (* input/returns - {state: string, curr: string, prev: string} *)
+    and shrink_string rec = 
+        let val rec_checked = if rec.state = "init" then {rec with next_shrink_info = 0} else rec in
+        case rec_checked.state of 
+        "cont_elem" => 
+            {rec_checked with state = "done"} (* TODO: Should actually shrink characters *)
+        | _ =>
+            let val ls_curr = string_to_list rec_checked.curr
+                val ls_prev = string_to_list rec_checked.prev
+                val shrinkers = map (fn _ => shrink_char) ls_curr   
+                val interim_res = 
+                    shrink_list shrinkers {state = rec_checked.state, 
+                                           curr = ls_curr, 
+                                           prev = ls_prev, 
+                                           idx = rec_checked.next_shrink_info, 
+                                           shrinkers = shrinkers,
+                                           prev_shrinkers = shrinkers} 
+                val new_curr = list_to_string interim_res.curr
+                val new_prev = list_to_string interim_res.prev
+
+                val res = {state = interim_res.state, curr = new_curr, prev = new_prev, next_shrink_info = interim_res.idx} 
+            in
+                res 
+            end
+        end
+        
+    and shrink_char rec = 
+        let val chars = 
+            ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
+            "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+            "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
+            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+            val rec_checked = if rec.curr = "a" then {rec with state = "done"} else rec 
+            val curr_val = rec_checked.curr in
+        case rec_checked.state of 
+        "rollback" =>
+            {state = "done", curr = rec.prev, prev = rec.curr, idx = rec.idx}
+        | "done" =>
+            rec_checked
+        | "init" => 
+            let val index_of_new = (lookup chars rec.curr 2) - 1
+                val new_char = nth chars index_of_new 
+            in 
+                {state = "cont", curr = new_char, prev = rec.curr, idx = index_of_new}
+            end
+        | _ =>
+            let val index_of_new = rec.idx-1
+                val new_char = nth chars index_of_new 
+            in 
+                {state = "cont", curr = new_char, prev = rec.curr, idx = index_of_new}
+            end
+        end
+
+    and shrink_sized_aggregate vals builder rec =
+        case rec.state of 
+        "init" => 
+            let val init_shrink_idx = 0
+                val new_vals = mapi (fn (i, x) => 
+                                        if i = init_shrink_idx then (x.shrinker {state = "init", curr = x.raw, prev = x.raw}) 
+                                        else {state = "init", curr = x.raw, prev = x.raw}) vals
+                val new_raw_vals = map (fn x => x.curr) new_vals
+                val new_state = if (foldl (fn (x,y) => (x.state = "done") andalso y) true new_vals) then "done" else "cont"
+                val shrink_idx = if (nth new_vals (init_shrink_idx+1)).state = "done" then init_shrink_idx+1 else init_shrink_idx
+            in 
+                {state = new_state, curr = (builder new_raw_vals), prev = rec.curr, next_shrink_info = new_vals, shrink_idx = shrink_idx}
+            end
+        | "cont" =>
+            let val init_shrink_idx = rec.shrink_idx
+                val new_vals = mapi (fn (i, x) => 
+                                        if i = init_shrink_idx then x.shrinker (nth rec.next_shrink_info (i+1)) 
+                                        else (nth rec.next_shrink_info (i+1))) vals
+                val new_raw_vals = map (fn x => x.curr) new_vals
+                val new_state = if (foldl (fn (x,y) => (x.state = "done") andalso y) true new_vals) then "done" else "cont"
+                val shrink_idx = if (nth new_vals (init_shrink_idx+1)).state = "done" then init_shrink_idx+1 else init_shrink_idx
+            in 
+                {state = new_state, curr = (builder new_raw_vals), prev = rec.curr, next_shrink_info = new_vals, shrink_idx = shrink_idx}
+            end
+        | "done" => 
+            rec 
+        | "rollback" =>
+            let val init_shrink_idx = rec.shrink_idx
+                fun rollback_aux (i, x) = 
+                    if i = init_shrink_idx then
+                        (let val val_to_shrink = {(nth rec.next_shrink_info (i+1)) with state = "rollback"}
+                        in 
+                            x.shrinker val_to_shrink 
+                        end )
+                        else (nth rec.next_shrink_info (i+1)) 
+                val rollback_args = mapi rollback_aux vals
+                val new_raw_vals = map (fn x => x.curr) rollback_args
+                val new_state = if (foldl (fn (x,y) => (x.state = "done") andalso y) true rollback_args) then "done" else "cont"
+                val shrink_idx = if (nth rollback_args (init_shrink_idx+1)).state = "done" then init_shrink_idx+1 else init_shrink_idx
+            in 
+                {state = new_state, curr = (builder new_raw_vals), prev = rec.curr, next_shrink_info = rollback_args, shrink_idx = shrink_idx}
+            end
+
+    and shrink_list shrinkers rec  = 
+        if (rec.curr = []) andalso (rec.state <> "rollback") then {rec with state = "done", prev = rec.curr, idx = 0}
+        else 
+            case rec.state of 
+            "init" => 
+                let val removeIdx = (length (rec.curr)) - 1
+                    val newList = remove_nth removeIdx rec.curr 0 
+                    val new_shrinkers = remove_nth removeIdx shrinkers 0 
+                    val next_state = if length newList = 0 then "cont_elem" else "cont_size"
+                in 
+                    {state = next_state, curr = newList, prev = rec.curr, idx = removeIdx, shrinkers = new_shrinkers, prev_shrinkers = shrinkers} 
+                end
+            | "cont_size" => 
+                let val remove_idx = (rec.idx - 1)
+                    val next_state = if remove_idx <= 0 then "cont_elem" else "cont_size"
+                    val new_list = remove_nth remove_idx rec.curr 0 
+                    val new_shrinkers = remove_nth remove_idx rec.shrinkers 0 
+                in  
+                    {state = next_state, curr = new_list, prev = rec.curr, idx = remove_idx, shrinkers = new_shrinkers, prev_shrinkers = rec.shrinkers} 
+                end
+            | "cont_elem" => 
+                let val interim_list = mapi (fn (i, x) => (nth rec.shrinkers (i+1)){state = "init", curr = x, prev = x}) rec.curr
+                    val next_state = if (foldl (fn (x,y) => (x.state = "done") andalso y) true interim_list) then "done" else "cont_elem"
+                    val new_list = map (fn x => x.curr) interim_list 
+                in
+                    {state = next_state, curr = new_list, prev = rec.curr, idx = rec.idx, shrinkers = rec.shrinkers, prev_shrinkers = rec.prev_shrinkers} 
+                end
+            | "rollback" => 
+                if (length rec.curr) = (length rec.prev) then 
+                    {state = "done", curr = rec.prev, prev = rec.curr, idx = rec.idx, shrinkers = rec.prev_shrinkers, prev_shrinkers = rec.shrinkers} (* TODO: this loops an unecesary amount of times *)
+                else 
+                    {state = "cont_size", curr = rec.prev, prev = rec.curr, idx = rec.idx, shrinkers = rec.prev_shrinkers, prev_shrinkers = rec.shrinkers}
+            | "done" => 
+                rec
+
+    and args_shrink args = 
+        case args.state of 
+        "rollback" => 
+            let val init_shrink_idx = args.shrink_idx
+                val rollbackReadyArgs = mapi (fn (i, x) => if (x.state = "done") orelse (i<>init_shrink_idx) then x else {x with state = "rollback"}) args.args
+                val argsRolledBack = mapi (fn (i, x) => if i = init_shrink_idx then (nth args.shrinkers (i+1)) x else x) rollbackReadyArgs 
+                val nextState = if (foldl (fn (x,y) => (x.state = "done") andalso y) true argsRolledBack) then "done" else "cont" 
+                val shrink_idx = if (nth argsRolledBack (init_shrink_idx+1)).state = "done" then init_shrink_idx+1 else init_shrink_idx
+            in
+                {state = nextState, args = argsRolledBack, shrinkers = args.shrinkers, shrink_idx = shrink_idx} 
+            end
+        | "done" => 
+            args
+        | _ => 
+            let val init_shrink_idx = args.shrink_idx
+                val newArgs = mapi (fn (i, x) => if i = init_shrink_idx then (nth args.shrinkers (i+1)) x else x) args.args
+                val nextState = if (foldl (fn (x,y) => (x.state = "done") andalso y) true newArgs) then "done" else "cont" 
+                val shrink_idx = if (nth newArgs (init_shrink_idx+1)).state = "done" then init_shrink_idx+1 else init_shrink_idx
+
+            in 
+                {state = nextState, args = newArgs, shrinkers = args.shrinkers, shrink_idx = shrink_idx} 
+            end
+
+    fun shrink_aux args prop pre counter = 
+        if counter = 100 then report_error ("shrinking_looped", 0) else
+        let val shrunk_args = args_shrink args 
+            val shrunk_args_raw = map (fn x => x.curr) shrunk_args.args 
+            val precond_is_met = if (pre <> ()) then (apply_args pre shrunk_args_raw) else true in
+        case (apply_args prop shrunk_args_raw) orelse (precond_is_met = false) of
+            true => shrink_aux (args_shrink {state = "rollback", args = shrunk_args.args, shrinkers = args.shrinkers, shrink_idx = args.shrink_idx}) prop pre (counter)
+            | false =>
+                if shrunk_args.state = "done" then {shrunk_ctx = shrunk_args_raw, count = counter} else shrink_aux shrunk_args prop pre (counter+1) end
+    fun rep_rng [] = ()
+    | rep_rng (x::xs) = 
+        {rnd = x, seq = xs} 
+
+    fun rec_rng ls = 
+        let val rnd = random() in 
+        {rnd = rnd, seq = append ls [rnd]} end
+
+    fun dec_nth list idx = 
+        let fun dec_nth_aux [] acc i = acc 
+            | dec_nth_aux (x::xs) acc i =
+                case i = idx of 
+                true => dec_nth_aux xs (append acc [(x/2)/2]) (i+1)
+                | false => dec_nth_aux xs (append acc [x]) (i+1)
+        in  
+            dec_nth_aux list [] 0 end
+
+    fun shrink_aux seqs gens prop pre size = 
+        print seqs;
+        case seqs of 
+        (x1::x2::xs) => 
+            let val (test_args, _) = 
+                        foldl (fn (x,y) => 
+                               let val rnd = x y.1 rep_rng size in
+                               (append y.0 [rnd.raw], rnd.sequence) end)([], x2) gens
+                val _ = print test_args
+                val precond_is_met = if (pre <> ()) then (apply_args pre test_args) else true 
+            in
+                case (apply_args prop test_args) orelse (precond_is_met = false) of 
+                true => print "test"; shrink_aux (x1::xs) gens prop pre size
+                |false => shrink x2 gens prop pre size 
+            end  
+        | (x::xs) => (foldl (fn (z,y) => 
+                            let val rnd = z y.1 rep_rng in
+                            (append y.0 rnd.raw, rnd.sequence) end) ([], x) gens).0
+
+    and shrink sequence gens prop pre size = 
+        if foldl (fn (x,y) => (x < 1/100) andalso y) true sequence then 
+            shrink_aux [sequence] gens prop pre size 
+        else 
+            let val decreased_seqs = mapi (fn (i, x) => dec_nth sequence i) sequence
+                val dec_seqs_w_root = append [sequence] decreased_seqs
+                val res = shrink_aux dec_seqs_w_root gens prop pre size
+            in res end
+(*
+--------------------------------
+GENERATORS - t
+-------------------------------- 
+*)  
+    (* return - {raw: number, shrinker: fn {state: string, curr: number, prev: number} => ..: {state: string, curr: number, prev: number}} *)
+    (* TODO: Fix shrinking towards zero -> should shrink towards lowest valid val *)
+    fun float_gen (low, high) ls rng size = 
+        let val x = rng ls
+            val bool_int = rng x.seq 
+            val bool = bool_int.rnd < 1/2 
+            val lInf = low = 1/0 (* check for inf *)
+            val hInf = high = 1/0
+            val raw_res = 
+                case (lInf, hInf) of 
+                    (true, true) => if bool then x.rnd*size else -x.rnd*size
+                    | (true, false) => high - (x.rnd*size) 
+                    | (false, true) => low + (x.rnd*size)
+                    | (false, false) => low + (x.rnd * (high-low)) 
+        in 
+            {raw = raw_res, sequence = bool_int.seq}
+        end
+    
+    fun int_gen (low, high) ls rng size = 
+        let val res = (float_gen (low, high+1) ls rng size)
+            val raw_res = floor (res.raw) 
+        in 
+            {raw = raw_res, sequence = res.sequence}
+        end
+    (* return - {raw: bool, shrinker: fn {state: string, curr: bool, prev: bool} => ..: {state: string, curr: bool, prev: bool}} *)
+    fun bool_gen ls rng size = 
+        let val rnd = int_gen (0,1) ls rng size
+            val res =  if rnd.raw = 0 then false
+                       else true 
+        in
+            {raw = res, sequence = rnd.sequence} 
+        end
+
+    (* return - {raw: list, shrinker: fn {state: string, curr: list, prev: list} => ..: {state: string, curr: list, prev: list}} *)
+    fun list_gen (generator) ls rng size = 
+        let val length = (int_gen (0, size) ls rng size)
+            val res = make_list ((fn () => generator ls rng size), length.raw) 
+            val raw_res = map (fn x => x.raw) res  
+            val sequence = foldl (fn (x,y) => append y x.sequence) [length.sequence] res in 
+        {raw = raw_res, sequence = sequence} 
+        end
+
+    (* NOTE: Generates only letters (upper and lower case) and numbers. *)
+    (* return - {raw: char, shrinker: fn {state: string, curr: char, prev: char} => ..: {state: string, curr: char, prev: char}} *)
+    fun char_gen ls rng size =
+        let val chars = 
+            ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
+            "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+            "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
+            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+            val x = (int_gen (1, ((length chars)-1)) ls rng size)
+        in 
+            {raw = (nth chars x.raw), sequence = x.sequence} 
+        end
+
+(* NOTE: Generates only strings of letters (upper and lower case) and numbers. *)
+    (* return - {raw: string, shrinker: fn {state: string, curr: string, prev: string} => ..: {state: string, curr: string, prev: string}} *)
+    fun string_gen ls rng size = 
+        let val x = (int_gen (0, size) ls rng size).raw
+            fun fold f acc 0 = acc 
+            | fold f acc i = fold f (acc ^ (f())) (i-1) 
+            val raw_string = (fold (fn () => (char_gen ls rng x).raw) "" x)
+        in  
+            {raw = raw_string, shrinker = shrink_string} 
+        end
+
+(* NOTE: Hardcoded for tuple of up to 10 elements *)
+(* returns a record with raw_inst: a tuple of whatever values specified, and meta_data is a list 
+    of all generated values in raw_inst along with their respective meta_data. *)
+    fun tuple_gen rng ts size = 
+        let val ts_vals = map (fn x => x size) ts
+            val ts_raw_vals = map (fn x => x.raw) ts_vals 
+            val ts_shrinkers = map (fn x => x.shrinker) ts_vals
+        in
+            {raw = (build_tuple ts_raw_vals), shrinker = shrink_sized_aggregate ts_vals build_tuple} 
+        end
+
+(* 
+ns: list of strings - will be used as fieldnames
+ts: list of generators - used to generate values for fields 
+
+Returns record: {raw_inst = <<actual result record>>, meta_data = (ns, <<list of all generated values for record with respective meta_data>>)}
+*)    
+    fun rec_gen rng ns ts size = 
+        if (length ns) <> (length ts) then 
+            report_error ("record_mismatch", 0)
+        else 
+            let val ts_vals = map (fn x => x size) ts
+                val ts_raw_vals = map (fn x => x.raw) ts_vals  
+                val raw_res = build_record ns ts_raw_vals 
+            in
+                {raw = raw_res, shrinker = shrink_sized_aggregate ts_vals (build_record ns)}
+            end 
+
+
+    fun generator_gen rng size = 
+        let val rnd = int_gen rng (1,7) size
+            val inf = 1/0
+            val res = if rnd = 1 then ((fn i => int_gen rng (inf, inf) i)) else 
+                      if rnd = 2 then ((fn i => bool_gen rng i)) else 
+                      if rnd = 3 then ((fn i => float_gen rng (inf, inf) i)) else
+                      if rnd = 4 then ((fn i => string_gen rng i)) else
+                      if rnd = 5 then ((fn i => char_gen rng i)) else
+                      if rnd = 6 then ((fn i => tuple_gen rng (make_list ((fn () => int_gen(inf, inf)), i)) i)) else
+                     ((fn i => list_gen rng (int_gen(inf, inf)) i)) in
+        res end
+        
+(* 
+--------------------------------
+CORE FUNCTIONALITY - a
+-------------------------------- 
+*)              
+    fun core_forall (generator, prop, 0, size, pre, cap) = {failReason = (), ctx = (), ctx_seq = (), remTests = 0, size = size}
+        |core_forall (generator, prop, i, size, pre, cap) =  
+            let val (sequence, raw_args) = foldl (fn (x,y) => 
+                                  let val arg = x y.0 rec_rng size in
+                                  (append y.0 arg.sequence, append y.1 [arg.raw]) end)([],[]) generator 
+             in
+                case pre of 
+                    () => 
+                        if (apply_args prop raw_args) then (write "."; core_forall (generator, prop, i-1, size+1, pre, cap))
+                        else (write "!"; {failReason = "false_prop", ctx = raw_args, ctx_seq = sequence, remTests = i, size = size})
+                    | _ => 
+                        if (apply_args pre raw_args) then 
+                            if (apply_args prop raw_args) then (write "."; core_forall (generator, prop, i-1, size+1, pre, cap))
+                            else (write "!"; {failReason = "false_prop", ctx = raw_args, ctx_seq = sequence, remTests = i, size = size})
+                        else 
+                        (write "x"; 
+                        if (size = cap) andalso (i*5 = cap) then report_error ("cant_satisfy", size)
+                        else if size = cap then {failReason = (), ctx = (), ctx_seq = (), remTests = i, size = size}
+                        else core_forall (generator, prop, i, size+1, pre, cap))
+            end
+
+    fun tc_n generators p noOfTests = 
+        let val (prop, pre) = 
+                case p of    
+                    (x,y) => (x,y)
+                    | x => (x, ())
+            val res = core_forall (generators, prop, noOfTests, 0, pre, (noOfTests*5)) in 
+            case res.failReason of
+                () => write ("\u001B[1m \u001B[32m \nSuccess: \u001B[0mPassed all " ^ (toString noOfTests) ^ " test(s).\n"); true
+                |_ => 
+                    report_fail_reason res noOfTests; 
+                    write ("\u001B[1m\u001B[34mShrinking\u001B[0m:");
+                    let val shrink_res = shrink res.ctx_seq generators prop pre res.size in
+                    write "\nFailing test case was shrunk to:\n";
+                    write (args_toString shrink_res.shrunk_ctx);
+                    write ("\nAfter " ^ (toString shrink_res.count) ^ " iterations.\n");
+                    false
+                    end
+        end
+    
+    fun tc generator p = tc_n generator p 100
+
+    fun troupecheck generator p noOfTests = spawn (fn() => tc_n generator p noOfTests)
+    | troupecheck generator p = spawn (fn() => tc generator p)
+
+(* 
+--------------------------------
+CONVENIENCE FUNCTIONS - s
+-------------------------------- 
+*)
+    val inf = 1 / 0
+    fun integer() = int_gen(inf, inf)
+        | integer (h, l) = int_gen(h, l)
+    
+    fun pos_integer() = integer(0, inf)
+
+    fun neg_integer() = integer(inf, -1)
+
+    fun float() = float_gen(inf, inf)
+        | float(h, l) = float_gen(h, l)
+
+    fun pos_float() = float(0, inf)
+
+    fun neg_float() = float(inf, 0)
+
+    fun boolean() = bool_gen
+
+    fun list() = list_gen(generator_gen()) (* TODO: generator_gen() should return both raw_gen and meta_data *)
+        |list(type) = list_gen(type)
+
+    fun string() = string_gen
+
+    fun char() = char_gen
+
+    fun tuple ts = tuple_gen ts
+    
+    fun record ns ts = rec_gen ns ts
+
+    fun one_of ls = 
+        let val idx = (int_gen (1, (length ls)) ((length ls))).raw
+        in 
+            nth ls idx
+        end   
+(* 
+--------------------------------
+FUNCTIONS FOR TESTING - d
+-------------------------------- 
+*) 
+    fun my_reverse xs = 
+        xs
+    
+    fun my_floor i =
+        if i >=0 then i - (i mod 1)
+        else i - (i mod 1) - 1
+
+    fun my_length [] = 0
+        | my_length (x::xs) = 1 + (my_length xs)
+
+    fun my_count y [] = 0
+        | my_count y (x::xs) = 
+            let val z = 
+                if y = x then 1 else 0 
+            in 
+            z + my_count y xs end 
+    
+    fun my_floor i =
+        if i >=0 then i - (i mod 1)
+        else i - (i mod 1) - 1
+    
+    fun my_ceil_1 i =
+        if i > 0 then i + (1 - (i mod 1))
+        else i + (1 - (i mod 1)) - 1
+    
+    fun my_ceil_2 i =
+        if i > 0 then (my_floor i) + 1
+        else if i = 0 then 0
+        else (my_floor i) + 1
+    
+    fun bad_insert xs x = 
+        if length xs < 10 then append [x] xs else
+        xs
+
+    fun one_of_two (x, y) =
+        let val bool = (bool_gen 0).raw in
+        if bool then x
+        else y end    
+    
+    fun bad_half n = 
+        if n > 10 then n else n/2
+
+    fun lengths_not_same s1 s2 = 
+        (string_length s1) <> (string_length s2)    
+    
+(*
+--------------------------------
+PROPERTIES FOR TESTING - f
+-------------------------------- 
+*)
+    fun bool_commutative x y = 
+        (x andalso y) = (y andalso x)
+    
+    fun number_commutative x y = 
+        x * y <= 50
+
+    fun list_reverse xs = 
+        reverse(reverse xs) = xs
+    
+    fun int_gen_stays_in_interval i = 
+        (integer(0, i) i).raw <= i
+    
+    fun abs_value_is_always_pos i =
+        abs_value i >= 0
+    
+    fun my_floor_test i =
+        my_floor i = floor i
+
+    fun my_length_test xs = 
+        my_length xs = length xs
+    
+    fun make_list_test i = 
+        let val generator = generator_gen i
+            fun f() = generator ((int_gen(0, inf) i).raw) 
+            val ls = (make_list (f, i)) in
+        (length ls) = i end
+    
+    fun my_count_returns_non_negative_int x xs = 
+        (my_count x xs) >= 0
+    
+    fun rec_test rec i = 
+        {theInteger = rec.theInteger, theString = rec.theString, z = i} = {rec with z = i}
+
+    fun pre_pos x = 
+        x >= 0
+
+    fun my_floor_test i =
+        my_floor i = floor i
+
+    fun my_ceil_1_test i =
+        my_ceil_1 i = ceil i
+    
+    fun my_ceil_2_test i =
+        my_ceil_2 i = ceil i
+    
+    fun both_ceil_test i =
+        my_ceil_1 i = my_ceil_2 i
+    
+    fun tup_test x y z w = x+y+z+w < 100 (* = w+z+y+x *)
+
+    fun no_args() = true
+
+    fun test_bad_insert xs x =
+        length (bad_insert xs x) = (length xs) + 1 
+    
+    fun test_bad_half n = 
+        n > (bad_half n)
+    
+    fun append_always_longer s1 s2 = 
+        string_length s1 < string_length (s1 ^ s2)
+    
+    fun record_shrink_test r = 
+        r.theInteger < 50
+
+(* 
+--------------------------------
+USED FOR USERGUIDE - g
+-------------------------------- 
+*)
+    fun filter_less ([], _) = []
+    | filter_less ((x::xs), p) = 
+        if x < p then append [x] (filter_less (xs, p)) else (filter_less (xs, p))
+
+    fun filter_greater ([], _) = []
+    | filter_greater ((x::xs), p) = 
+        if x > p then append [x] (filter_greater (xs, p)) else (filter_greater (xs, p))
+
+
+    fun my_quicksort [] = []
+    | my_quicksort (x::xs) =
+        let val smaller = my_quicksort(filter_less(xs, x))
+            val greater = my_quicksort(filter_greater(xs, x)) in 
+        append (append smaller [x]) (greater) end
+    
+    fun ordered [] = true
+    | ordered (x::[]) = true 
+    | ordered (x::y::ys) = 
+        if x <= y then ordered (y::ys) else false
+
+    fun my_sort_is_ordered xs = 
+        ordered (my_quicksort xs) 
+    
+    fun my_sort_keep_length xs = 
+        length xs = length (my_quicksort(xs))
+    
+    fun pre_list_size_greater_than_one xs = 
+        if (length xs) <= 1 then false else true
+    
+    fun no_duplicates[] = true 
+    | no_duplicates (x::xs) = if (elem x xs) then false else no_duplicates xs
+
+    fun cons_length_increase xs x = 
+        (length (x::xs)) = ((length xs) + 1)
+(*
+--------------------------------
+TC^2 - z
+-------------------------------- 
+*)
+    fun tc_sort_length_always_fails () =    
+        tc [list(integer())] my_sort_keep_length = false
+    
+    fun tc_sort_ordered_always_true () =    
+        tc [list(integer())] my_sort_is_ordered = true
+
+(*
+--------------------------------
+CUSTOM TYPE PROGRAM
+-------------------------------- 
+*)
+    fun eval exp env =
+    case exp of
+      ("num", n) => n
+    | ("var", n) => lookup env n ("unknown variable " ^ n)
+    | ("add", e1, e2) => (eval e1 env) + (eval e2 env)
+    | ("sub", e1, e2) => (eval e1 env) - (eval e2 env)
+    | ("mul", e1, e2) => (eval e1 env) * (eval e2 env)
+    | ("div", e1, e2) => (eval e1 env) / (eval e2 env)
+    | _ => print ("Error: ill defined expression"); exit (authority, 1)
+
+    fun execute stmt env =
+        case stmt of
+        ("assign", var, exp) =>
+            let val value = eval exp env
+            in
+                append [(var, value)] env
+            end
+        | ("print", exp) => (print (toString (eval exp env)); env)
+
+    fun interpret prog =
+        let fun interpretHelper [] env = env
+            | interpretHelper (stmt :: rest) env =
+                let val newEnv = execute stmt env
+                in
+                    interpretHelper rest newEnv
+                end
+            val stmts = remove_nth ((length prog)-1) prog 0
+            val exp = nth prog (length prog)
+            val last_env = (interpretHelper stmts [])
+        in
+            eval exp last_env
+        end
+    
+    fun optimize_prog prog =
+        let val stmts = remove_nth ((length prog)-1) prog 0
+            val exp = nth prog (length prog)
+            fun optimize_exp exp =
+                case exp of
+                ("num", n) => ("num", n)
+                | ("var", x) => ("var", x)
+                | ("add", e1, e2) => 
+                    (case e1 of 
+                    ("num", n1) => (case e2 of 
+                                    ("num", n2) => ("num", (n1+n2))
+                                    |_ => ("add", (optimize_exp e1), (optimize_exp e2)))
+                    | _ => ("add", (optimize_exp e1), (optimize_exp e2)))
+                | ("sub", e1, e2) => 
+                    (case e1 of 
+                    ("num", n1) => (case e2 of 
+                                    ("num", n2) => ("num", (n1-n2))
+                                    |_ => ("sub", (optimize_exp e1), (optimize_exp e2)) )
+                    |_ => ("sub", (optimize_exp e1), (optimize_exp e2)))
+                | ("mul", e1, e2) => 
+                    (case e1 of 
+                    ("num", n1) => (case e2 of 
+                                    ("num", n2) => ("num", (n1*n2))
+                                    |_ => ("mul", (optimize_exp e1), (optimize_exp e2)) )
+                    |_ => ("mul", (optimize_exp e1), (optimize_exp e2)))
+                | ("div", e1, e2) => 
+                    (case e1 of 
+                    ("num", n1) => (case e2 of 
+                                    ("num", n2) => if ((n1 = 0) andalso (n2 = 0)) then ("div", e1, e2) else ("num", (n1/n2))
+                                    |_ => ("div", (optimize_exp e1), (optimize_exp e2)) )
+                    |_ => ("div", (optimize_exp e1), (optimize_exp e2)))
+
+            fun optimize_stmt stmt =
+                case stmt of
+                ("assign", var, exp) => ("assign", var, (optimize_exp exp))
+                | ("print", exp) => ("print", (optimize_exp exp))
+        in
+            append (map optimize_stmt stmts) [optimize_exp exp]
+        end 
+
+    fun exp_gen ls nesting_level size = 
+        let val exp_ts = if length ls = 0 then ["num", "add", "sub", "mul", "div"] else ["num", "var", "add", "sub", "mul", "div"]
+            val exp_type = if nesting_level = 2 then "num" else one_of exp_ts
+        in 
+            case exp_type of 
+            "num" => 
+                let val value = int_gen(inf, inf) size 
+                    fun shrinker inst = 
+                        let val shrunk_val = value.shrinker {state = inst.state, curr = inst.curr.1, prev = inst.prev.1} in 
+                        {state = shrunk_val.state, curr = ("num", shrunk_val.curr), prev = ("num", shrunk_val.prev)} end in
+                {raw = ("num", value.raw), shrinker = shrinker} end
+            | "var" => 
+                let val value = one_of ls 
+                    fun shrinker inst = 
+                        {inst with state = "done"} in
+                {raw = ("var", value), shrinker = shrinker} end 
+            |"add" => 
+                let val e1 = exp_gen ls (nesting_level+1) size 
+                    val e2 = exp_gen ls (nesting_level+1) size
+                    fun shrinker inst = 
+                        let val shrunk_e1 = e1.shrinker {state = inst.state, curr = inst.curr.1, prev = inst.prev.1}
+                            val shrunk_e2 = e2.shrinker {state = inst.state, curr = inst.curr.2, prev = inst.prev.2}
+                            val next_state = if shrunk_e1.state = "done" then shrunk_e2.state else shrunk_e1.state 
+                        in 
+                            {state = next_state, curr = ("add", shrunk_e1.curr, shrunk_e2.curr), prev = inst.prev}
+                        end 
+                in
+                    {raw = ("add", e1.raw, e2.raw), shrinker = shrinker} 
+                end
+            |"sub" => 
+                let val e1 = exp_gen ls (nesting_level+1) size 
+                    val e2 = exp_gen ls (nesting_level+1) size
+                    fun shrinker inst = 
+                        let val shrunk_e1 = e1.shrinker {state = inst.state, curr = inst.curr.1, prev = inst.prev.1}
+                            val shrunk_e2 = e2.shrinker {state = inst.state, curr = inst.curr.2, prev = inst.prev.2}
+                            val next_state = if shrunk_e1.state = "done" then shrunk_e2.state else shrunk_e1.state 
+                        in 
+                            {state = next_state, curr = ("sub", shrunk_e1.curr, shrunk_e2.curr), prev = inst.prev}
+                        end 
+                in
+                    {raw = ("sub", e1.raw, e2.raw), shrinker = shrinker} 
+                end
+            |"mul" => 
+                let val e1 = exp_gen ls (nesting_level+1) size 
+                    val e2 = exp_gen ls (nesting_level+1) size
+                    fun shrinker inst = 
+                        let val shrunk_e1 = e1.shrinker {state = inst.state, curr = inst.curr.1, prev = inst.prev.1}
+                            val shrunk_e2 = e2.shrinker {state = inst.state, curr = inst.curr.2, prev = inst.prev.2}
+                            val next_state = if shrunk_e1.state = "done" then shrunk_e2.state else shrunk_e1.state 
+                        in 
+                            {state = next_state, curr = ("mul", shrunk_e1.curr, shrunk_e2.curr), prev = inst.prev}
+                        end 
+                in
+                    {raw = ("mul", e1.raw, e2.raw), shrinker = shrinker} 
+                end
+            |"div" => 
+                let val e1 = exp_gen ls (nesting_level+1) size 
+                    val e2 = exp_gen ls (nesting_level+1) size
+                    fun shrinker inst = 
+                        let val shrunk_e1 = e1.shrinker {state = inst.state, curr = inst.curr.1, prev = inst.prev.1}
+                            val shrunk_e2 = e2.shrinker {state = inst.state, curr = inst.curr.2, prev = inst.prev.2}
+                            val next_state = if shrunk_e1.state = "done" then shrunk_e2.state else shrunk_e1.state 
+                        in 
+                            {state = next_state, curr = ("div", shrunk_e1.curr, shrunk_e2.curr), prev = inst.prev}
+                        end 
+                in
+                    {raw = ("div", e1.raw, e2.raw), shrinker = shrinker} (* maybe just shrinker? *)
+                end  
+        end
+    
+    fun assign_stmt_gen ls size = 
+        let val n = string_gen size 
+            val exp = exp_gen ls 0 size 
+            fun shrinker inst = 
+                let val shrunk_exp = exp.shrinker {state = inst.state, curr = inst.curr.2, prev = inst.prev.2}
+                    val shrunk_assign = ("assign", n.raw, shrunk_exp.curr)
+                in  
+                    {state = shrunk_exp.state, curr = shrunk_assign, prev = inst.curr}
+                end
+        in
+            {raw = ("assign", n.raw, exp.raw), shrinker = shrinker} 
+        end 
+    
+    fun print_stmt_gen ls size = 
+        let val exp = exp_gen ls 0 size 
+            fun shrinker inst =
+                let val shrunk_exp = exp.shrinker {state = inst.state, curr = inst.curr.1, prev = inst.prev.1}
+                    val shrunk_print = ("print", shrunk_exp.curr)
+                in 
+                    {state = shrunk_exp.state, curr = shrunk_print, prev = inst.curr}
+                end 
+        in 
+            {raw = ("print", exp.raw), shrinker = shrinker}
+        end 
+
+    fun stmt_gen ls size = 
+        let val stmt = one_of ["assign", "print"] 
+        in 
+            case stmt of
+            "assign" => 
+                let val res = assign_stmt_gen ls size in 
+                {raw = res.raw, shrinker = res.shrinker} end
+            |"print" => 
+                let val res = print_stmt_gen ls size in 
+                {raw = res.raw, shrinker = res.shrinker} end
+        end 
+    
+    fun assign_in_use_aux stmt_or_exp assign idx = 
+        case stmt_or_exp.0 of 
+        "print" => 
+            assign_in_use_aux stmt_or_exp.1 assign idx
+        | "assign" => 
+            assign_in_use_aux stmt_or_exp.2 assign idx 
+        | "var" => if stmt_or_exp.1 = assign then true else false
+        | "num" => false
+        | _ => 
+            if assign_in_use_aux stmt_or_exp.1 assign idx then 
+                true
+            else 
+                assign_in_use_aux stmt_or_exp.2 assign idx
+
+    fun assign_in_use [] idxs assign idx bool = (bool, idxs) 
+        | assign_in_use (x::xs) idxs assign idx bool = 
+            let val res = assign_in_use_aux x assign idx 
+            in 
+                if res then assign_in_use xs (append [idx] idxs) assign (idx+1) true 
+                else assign_in_use xs idxs assign (idx+1) bool 
+            end
+
+    fun program_gen size = 
+        let val num_of_insts = (int_gen(0, size) size ).raw
+            fun prog_gen_aux env p s 0 = (p, s, env) 
+            | prog_gen_aux env p s i = 
+                let val stmt = stmt_gen env size 
+                    val newEnv = if stmt.raw.0 = "assign" then (append [stmt.raw.1] env) else env
+                in 
+                    prog_gen_aux newEnv (append p [stmt.raw]) (append s [stmt.shrinker]) (i-1)
+                end 
+            val (prog_stmts, shrinkers_interim, last_env) = prog_gen_aux [] [] [] num_of_insts
+            val last_exp = exp_gen last_env 0 size
+            val prog = append prog_stmts [last_exp.raw]
+            val shrinkers = append shrinkers_interim [last_exp.shrinker]
+            fun shrinker inst = 
+                case inst.state of 
+                "init" => 
+                    let val shrunk = shrink_list shrinkers inst 
+                    in 
+                        shrunk 
+                    end 
+                | "cont_size" => 
+                    let val next_elem = nth inst.curr (length inst.curr) 
+                    in  
+                        if next_elem.0 = "assign" then 
+                            if (assign_in_use inst.curr [] (next_elem.1) 0 false).0 then 
+                                print "testing";
+                                {inst with idx = inst.idx-1} 
+                            else if (next_elem.0 = "var") orelse (next_elem.0 = "num") orelse (next_elem.0 = "add") orelse (next_elem.0 = "sub") orelse
+                                    (next_elem.0 = "mul") orelse (next_elem.0 = "div") then
+                                {inst with idx = inst.idx-1} 
+
+                            else
+                                shrink_list shrinkers inst 
+                        else 
+                            shrink_list shrinkers inst 
+                    end
+                | _ => 
+                    shrink_list shrinkers inst                      
+        in 
+            {raw = prog, shrinker = shrinker}
+        end
+    
+    fun test_prog_opt prog = 
+        (interpret prog) = (interpret (optimize_prog prog))
+in
+
+(*
+--------------------------------
+ALL TESTS - x
+-------------------------------- 
+*)
+tc [integer(), integer()] number_commutative
+(* shrinking tests - x *)
+(* tc [list(integer()), integer()] test_bad_insert;
+tc [integer()] (test_bad_half, (fn x => x >= 15));
+tc [string(), string()] (append_always_longer, lengths_not_same);
+tc [record ["theInteger", "theString"] [integer(), string()]] record_shrink_test; *)
+
+(* tc^2 tests *)
+(* tc [] tc_sort_ordered_always_true; *)
+
+(* User guide tests *)
+(* tc [list(integer()), integer()] cons_length_increase;
+tc [list(integer())] my_sort_is_ordered;
+tc [list(integer())] my_sort_keep_length;
+tc [list(integer())] (my_sort_keep_length, no_duplicates); *)
+
+(* General functionality tests *)
+(* tc [(record ["theInteger", "theString"][integer(), string()]), integer()] rec_test;
+tc [] no_args;
+tc [integer(), integer(), integer(), integer()] tup_test;
+write "\nTesting on bools commutative:";
+tc [boolean(), boolean()] bool_commutative;
+write "\nTesting on numbers commutative:";
+tc [integer(), integer()] number_commutative;
+write "\nTesting on list reverse:";
+tc [list(integer())] list_reverse; 
+write "\nTesting on int_gen interval:";
+tc [integer()] (int_gen_stays_in_interval, pre_pos);
+write "\nTesting on abs_value:";
+tc  [one_of_two (integer(), float())] abs_value_is_always_pos;
+write "\nTesting on my_floor:";
+tc  [float()] my_floor_test; 
+write "\nTesting that my_count always return non-negative result:";
+tc_n [integer(), list(integer())] my_count_returns_non_negative_int 1000;
+write "\nTesting my_length:";
+tc [list(integer())] my_length_test;
+write "\nTesting make_list:";
+tc [pos_integer()] make_list_test;
+write "Testing on my_ceil_1:";
+tc  [float()] my_ceil_1_test;
+write "Testing on my_ceil_2:";
+tc  [float()] my_ceil_2_test;
+write "Testing on both ceil functions:";
+tc  [float()] both_ceil_test *)
+end
