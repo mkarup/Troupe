@@ -166,17 +166,13 @@ SHRINKING - r
                                         else cutoff_at (nth seqs_of_curr (i+1)) ((nth lengths (i+1))-(length x))) left_over_seqs
                 val precond_is_met = if (pre <> ()) then (apply_args pre test_args) else true 
             in
-                
                 case (apply_args prop test_args) orelse (precond_is_met = false) of 
                 true => shrink_aux (x1::xs) gens lengths prop pre size
-                |false => shrink ret_seqs gens prop pre size 
+                | false => shrink ret_seqs gens prop pre size 
             end  
         | (x::xs) => 
             let val seqs_of_curr = seqs_of_seq x lengths
                 val test_args = mapi (fn (i, y) => (y (nth seqs_of_curr (i+1)) rep_rng size).raw) gens
-            (* res = (foldl (fn (z,y) => 
-                            let val rnd = z y.1 rep_rng size in
-                            (append y.0 [rnd.raw], rnd.sequence) end) ([], x) gens).0 *)
                 val precond_is_met = if (pre <> ()) then (apply_args pre test_args) else true
             in  
                 case (apply_args prop test_args) orelse (precond_is_met = false) of 
@@ -241,10 +237,12 @@ GENERATORS - t
     (* return - {raw: list, shrinker: fn {state: string, curr: list, prev: list} => ..: {state: string, curr: list, prev: list}} *)
     fun list_gen (generator) ls rng size = 
         let val length = (int_gen (0, size) ls rng size)
-            val res = make_list ((fn () => generator ls rng size), length.raw) 
-            val raw_res = map (fn x => x.raw) res  
-            val sequence = foldl (fn (x,y) => append y x.sequence) [length.sequence] res in 
-        {raw = raw_res, sequence = sequence} 
+            fun fold f acc 0 = acc 
+            | fold f (acc, seq) i = 
+                let val inst = f seq rng size in 
+                fold f (append acc [inst.raw], inst.sequence) (i-1) end
+            val (list, seq) = (fold generator ([], length.sequence) length.raw) in 
+        {raw = list, sequence = seq} 
         end
 
     (* NOTE: Generates only letters (upper and lower case) and numbers. *)
@@ -828,7 +826,8 @@ CUSTOM TYPE PROGRAM
 in
 
 tc [string(), string()] (append_always_longer, lengths_not_same);
-tc [record ["theInteger", "theString"] [integer(), string()]] record_shrink_test
+tc [record ["theInteger", "theString"] [integer(), string()]] record_shrink_test;
+tc [list(integer()), integer()] test_bad_insert
 (* print (shrink test_seq [int_gen(0,100)] (fn x => x < 5) () 10) *)
 
 (*
