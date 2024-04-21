@@ -394,10 +394,10 @@ CONVENIENCE FUNCTIONS - s
     
     fun record ns ts = rec_gen ns ts
 
-    fun one_of ls = 
-        let val idx = (int_gen (1, (length ls)) ((length ls))).raw
+    fun one_of ls rng_ls rng = 
+        let val idx = (int_gen (1, (length ls)) rng_ls rng ((length ls)))
         in 
-            nth ls idx
+            {raw = (nth ls idx.raw), sequence = idx.sequence}
         end   
 (* 
 --------------------------------
@@ -438,10 +438,10 @@ FUNCTIONS FOR TESTING - d
         if length xs < 10 then append [x] xs else
         xs
 
-    fun one_of_two (x, y) =
-        let val bool = (bool_gen 0).raw in
-        if bool then x
-        else y end    
+    fun one_of_two (x, y) ls rng size =
+        let val bool = (bool_gen ls rng size) in
+        if bool.raw then x bool.sequence rng size
+        else y bool.sequence rng size end    
     
     fun bad_half n = 
         if n > 10 then n else n/2
@@ -464,7 +464,7 @@ PROPERTIES FOR TESTING - f
         reverse(reverse xs) = xs
     
     fun int_gen_stays_in_interval i = 
-        (integer(0, i) i).raw <= i
+        (integer(0, i)[] rec_rng i).raw <= i
     
     fun abs_value_is_always_pos i =
         abs_value i >= 0
@@ -477,7 +477,7 @@ PROPERTIES FOR TESTING - f
     
     fun make_list_test i = 
         let val generator = generator_gen i
-            fun f() = generator ((int_gen(0, inf) i).raw) 
+            fun f() = generator ((int_gen(0, inf) [] rec_rng i).raw) 
             val ls = (make_list (f, i)) in
         (length ls) = i end
     
@@ -573,7 +573,7 @@ TC^2 - z
 CUSTOM TYPE PROGRAM
 -------------------------------- 
 *)
-(*     fun eval exp env =
+    fun eval exp env =
     case exp of
       ("num", n) => n
     | ("var", n) => lookup env n ("unknown variable " ^ n)
@@ -646,187 +646,90 @@ CUSTOM TYPE PROGRAM
             append (map optimize_stmt stmts) [optimize_exp exp]
         end 
 
-    fun exp_gen ls nesting_level size = 
+    fun exp_gen ls nesting_level rng_ls rng size = 
         let val exp_ts = if length ls = 0 then ["num", "add", "sub", "mul", "div"] else ["num", "var", "add", "sub", "mul", "div"]
-            val exp_type = if nesting_level = 2 then "num" else one_of exp_ts
+            val exp_type = if nesting_level = 2 then {raw = "num", sequence = rng_ls} else one_of exp_ts rng_ls rng
         in 
-            case exp_type of 
+            case exp_type.raw of 
             "num" => 
-                let val value = int_gen(inf, inf) size 
-                    fun shrinker inst = 
-                        let val shrunk_val = value.shrinker {state = inst.state, curr = inst.curr.1, prev = inst.prev.1} in 
-                        {state = shrunk_val.state, curr = ("num", shrunk_val.curr), prev = ("num", shrunk_val.prev)} end in
-                {raw = ("num", value.raw), shrinker = shrinker} end
+                let val value = int_gen(inf, inf) exp_type.sequence rng size in
+                {raw = ("num", value.raw), sequence = value.sequence} end
             | "var" => 
-                let val value = one_of ls 
-                    fun shrinker inst = 
-                        {inst with state = "done"} in
-                {raw = ("var", value), shrinker = shrinker} end 
+                let val value = one_of ls exp_type.sequence rng in
+                {raw = ("var", value.raw), sequence = value.sequence} end 
             |"add" => 
-                let val e1 = exp_gen ls (nesting_level+1) size 
-                    val e2 = exp_gen ls (nesting_level+1) size
-                    fun shrinker inst = 
-                        let val shrunk_e1 = e1.shrinker {state = inst.state, curr = inst.curr.1, prev = inst.prev.1}
-                            val shrunk_e2 = e2.shrinker {state = inst.state, curr = inst.curr.2, prev = inst.prev.2}
-                            val next_state = if shrunk_e1.state = "done" then shrunk_e2.state else shrunk_e1.state 
-                        in 
-                            {state = next_state, curr = ("add", shrunk_e1.curr, shrunk_e2.curr), prev = inst.prev}
-                        end 
+                let val e1 = exp_gen ls (nesting_level+1) exp_type.sequence rng size 
+                    val e2 = exp_gen ls (nesting_level+1) e1.sequence rng size
                 in
-                    {raw = ("add", e1.raw, e2.raw), shrinker = shrinker} 
+                    {raw = ("add", e1.raw, e2.raw), sequence = e2.sequence} 
                 end
             |"sub" => 
-                let val e1 = exp_gen ls (nesting_level+1) size 
-                    val e2 = exp_gen ls (nesting_level+1) size
-                    fun shrinker inst = 
-                        let val shrunk_e1 = e1.shrinker {state = inst.state, curr = inst.curr.1, prev = inst.prev.1}
-                            val shrunk_e2 = e2.shrinker {state = inst.state, curr = inst.curr.2, prev = inst.prev.2}
-                            val next_state = if shrunk_e1.state = "done" then shrunk_e2.state else shrunk_e1.state 
-                        in 
-                            {state = next_state, curr = ("sub", shrunk_e1.curr, shrunk_e2.curr), prev = inst.prev}
-                        end 
+                let val e1 = exp_gen ls (nesting_level+1) exp_type.sequence rng size 
+                    val e2 = exp_gen ls (nesting_level+1) e1.sequence rng size
                 in
-                    {raw = ("sub", e1.raw, e2.raw), shrinker = shrinker} 
+                    {raw = ("sub", e1.raw, e2.raw), sequence = e2.sequence} 
                 end
             |"mul" => 
-                let val e1 = exp_gen ls (nesting_level+1) size 
-                    val e2 = exp_gen ls (nesting_level+1) size
-                    fun shrinker inst = 
-                        let val shrunk_e1 = e1.shrinker {state = inst.state, curr = inst.curr.1, prev = inst.prev.1}
-                            val shrunk_e2 = e2.shrinker {state = inst.state, curr = inst.curr.2, prev = inst.prev.2}
-                            val next_state = if shrunk_e1.state = "done" then shrunk_e2.state else shrunk_e1.state 
-                        in 
-                            {state = next_state, curr = ("mul", shrunk_e1.curr, shrunk_e2.curr), prev = inst.prev}
-                        end 
+                let val e1 = exp_gen ls (nesting_level+1) exp_type.sequence rng size 
+                    val e2 = exp_gen ls (nesting_level+1) e1.sequence rng size
                 in
-                    {raw = ("mul", e1.raw, e2.raw), shrinker = shrinker} 
+                    {raw = ("mul", e1.raw, e2.raw), sequence = e2.sequence} 
                 end
             |"div" => 
-                let val e1 = exp_gen ls (nesting_level+1) size 
-                    val e2 = exp_gen ls (nesting_level+1) size
-                    fun shrinker inst = 
-                        let val shrunk_e1 = e1.shrinker {state = inst.state, curr = inst.curr.1, prev = inst.prev.1}
-                            val shrunk_e2 = e2.shrinker {state = inst.state, curr = inst.curr.2, prev = inst.prev.2}
-                            val next_state = if shrunk_e1.state = "done" then shrunk_e2.state else shrunk_e1.state 
-                        in 
-                            {state = next_state, curr = ("div", shrunk_e1.curr, shrunk_e2.curr), prev = inst.prev}
-                        end 
+                let val e1 = exp_gen ls (nesting_level+1) exp_type.sequence rng size 
+                    val e2 = exp_gen ls (nesting_level+1) e1.sequence rng size
                 in
-                    {raw = ("div", e1.raw, e2.raw), shrinker = shrinker} (* maybe just shrinker? *)
+                    {raw = ("div", e1.raw, e2.raw), sequence = e2.sequence}
                 end  
         end
     
-    fun assign_stmt_gen ls size = 
-        let val n = string_gen size 
-            val exp = exp_gen ls 0 size 
-            fun shrinker inst = 
-                let val shrunk_exp = exp.shrinker {state = inst.state, curr = inst.curr.2, prev = inst.prev.2}
-                    val shrunk_assign = ("assign", n.raw, shrunk_exp.curr)
-                in  
-                    {state = shrunk_exp.state, curr = shrunk_assign, prev = inst.curr}
-                end
+    fun assign_stmt_gen ls rng_ls rng size = 
+        let val n = string_gen rng_ls rng size 
+            val exp = exp_gen ls 0 n.sequence rng size 
         in
-            {raw = ("assign", n.raw, exp.raw), shrinker = shrinker} 
+            {raw = ("assign", n.raw, exp.raw), sequence = exp.sequence} 
         end 
     
-    fun print_stmt_gen ls size = 
-        let val exp = exp_gen ls 0 size 
-            fun shrinker inst =
-                let val shrunk_exp = exp.shrinker {state = inst.state, curr = inst.curr.1, prev = inst.prev.1}
-                    val shrunk_print = ("print", shrunk_exp.curr)
-                in 
-                    {state = shrunk_exp.state, curr = shrunk_print, prev = inst.curr}
-                end 
+    fun print_stmt_gen ls rng_ls rng size = 
+        let val exp = exp_gen ls 0 rng_ls rng size 
         in 
-            {raw = ("print", exp.raw), shrinker = shrinker}
+            {raw = ("print", exp.raw), sequence = exp.sequence}
         end 
 
-    fun stmt_gen ls size = 
-        let val stmt = one_of ["assign", "print"] 
+    fun stmt_gen ls rng_ls rng size = 
+        let val stmt = one_of ["assign", "print"] rng_ls rng
         in 
-            case stmt of
+            case stmt.raw of
             "assign" => 
-                let val res = assign_stmt_gen ls size in 
-                {raw = res.raw, shrinker = res.shrinker} end
+                let val res = assign_stmt_gen ls stmt.sequence rng size in 
+                {raw = res.raw, sequence = res.sequence} end
             |"print" => 
-                let val res = print_stmt_gen ls size in 
-                {raw = res.raw, shrinker = res.shrinker} end
+                let val res = print_stmt_gen ls stmt.sequence rng size in 
+                {raw = res.raw, sequence = res.sequence} end
         end 
     
-    fun assign_in_use_aux stmt_or_exp assign idx = 
-        case stmt_or_exp.0 of 
-        "print" => 
-            assign_in_use_aux stmt_or_exp.1 assign idx
-        | "assign" => 
-            assign_in_use_aux stmt_or_exp.2 assign idx 
-        | "var" => if stmt_or_exp.1 = assign then true else false
-        | "num" => false
-        | _ => 
-            if assign_in_use_aux stmt_or_exp.1 assign idx then 
-                true
-            else 
-                assign_in_use_aux stmt_or_exp.2 assign idx
-
-    fun assign_in_use [] idxs assign idx bool = (bool, idxs) 
-        | assign_in_use (x::xs) idxs assign idx bool = 
-            let val res = assign_in_use_aux x assign idx 
-            in 
-                if res then assign_in_use xs (append [idx] idxs) assign (idx+1) true 
-                else assign_in_use xs idxs assign (idx+1) bool 
-            end
-
-    fun program_gen size = 
-        let val num_of_insts = (int_gen(0, size) size ).raw
-            fun prog_gen_aux env p s 0 = (p, s, env) 
-            | prog_gen_aux env p s i = 
-                let val stmt = stmt_gen env size 
+    fun program_gen rng_ls rng size = 
+        let val num_of_insts = (int_gen(0, size) rng_ls rng size)
+            fun prog_gen_aux env p seq 0 = (p, seq, env) 
+            | prog_gen_aux env p seq i = 
+                let val stmt = stmt_gen env seq rng size 
                     val newEnv = if stmt.raw.0 = "assign" then (append [stmt.raw.1] env) else env
                 in 
-                    prog_gen_aux newEnv (append p [stmt.raw]) (append s [stmt.shrinker]) (i-1)
+                    prog_gen_aux newEnv (append p [stmt.raw]) stmt.sequence (i-1)
                 end 
-            val (prog_stmts, shrinkers_interim, last_env) = prog_gen_aux [] [] [] num_of_insts
-            val last_exp = exp_gen last_env 0 size
+            val (prog_stmts, sequence_interim, last_env) = prog_gen_aux [] [] num_of_insts.sequence num_of_insts.raw
+            val last_exp = exp_gen last_env 0 sequence_interim rng size
             val prog = append prog_stmts [last_exp.raw]
-            val shrinkers = append shrinkers_interim [last_exp.shrinker]
-            fun shrinker inst = 
-                case inst.state of 
-                "init" => 
-                    let val shrunk = shrink_list shrinkers inst 
-                    in 
-                        shrunk 
-                    end 
-                | "cont_size" => 
-                    let val next_elem = nth inst.curr (length inst.curr) 
-                    in  
-                        if next_elem.0 = "assign" then 
-                            if (assign_in_use inst.curr [] (next_elem.1) 0 false).0 then 
-                                print "testing";
-                                {inst with idx = inst.idx-1} 
-                            else if (next_elem.0 = "var") orelse (next_elem.0 = "num") orelse (next_elem.0 = "add") orelse (next_elem.0 = "sub") orelse
-                                    (next_elem.0 = "mul") orelse (next_elem.0 = "div") then
-                                {inst with idx = inst.idx-1} 
-
-                            else
-                                shrink_list shrinkers inst 
-                        else 
-                            shrink_list shrinkers inst 
-                    end
-                | _ => 
-                    shrink_list shrinkers inst                      
+            val res_sequence = last_exp.sequence                   
         in 
-            {raw = prog, shrinker = shrinker}
+            {raw = prog, sequence = res_sequence}
         end
     
     fun test_prog_opt prog = 
-        (interpret prog) = (interpret (optimize_prog prog)) *)
-    val test_seq = [1/6, 1/13]
-    val test_res = 16
+        (interpret prog) = (interpret (optimize_prog prog))
 in
 
-tc [string(), string()] (append_always_longer, lengths_not_same);
-tc [record ["theInteger", "theString"] [integer(), string()]] record_shrink_test;
-tc [list(integer()), integer()] test_bad_insert
-(* print (shrink test_seq [int_gen(0,100)] (fn x => x < 5) () 10) *)
+tc [program_gen] test_prog_opt
 
 (*
 --------------------------------
@@ -847,7 +750,7 @@ tc [record ["theInteger", "theString"] [integer(), string()]] record_shrink_test
 (* tc [list(integer()), integer()] cons_length_increase;
 tc [list(integer())] my_sort_is_ordered;
 tc [list(integer())] my_sort_keep_length;
-tc [list(integer())] (my_sort_keep_length, no_duplicates); *)
+tc [list(integer())] (my_sort_keep_length, no_duplicates) *)
 
 (* General functionality tests *)
 (* tc [(record ["theInteger", "theString"][integer(), string()]), integer()] rec_test;
