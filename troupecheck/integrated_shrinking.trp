@@ -140,14 +140,25 @@ SHRINKING - r
                 else 
                     dec_all_aux (append acc [(dec_nth seq i)]) xs (i+1) in 
         dec_all_aux [] seq 0 end
+    
+    fun seqs_of_seq sequence lengths = 
+        let fun aux seq acc 0 = (acc, seq) 
+            | aux (x::xs) acc n = 
+                aux xs (append acc [x]) (n-1) in 
+        foldl (fn (x,(acc, s)) => 
+                                let val (curr_acc, curr_seq) = aux s [] x in 
+                                (append acc [curr_acc], curr_seq) end)([], sequence) lengths
 
-    fun shrink_aux seqs gens prop pre size = 
+    fun shrink_aux seqs gens lengths prop pre size = 
         case seqs of 
         (x1::x2::xs) => 
-            let val (test_args, _) = 
+            let val seqs_of_curr = seqs_of_seq x2 lengths
+                val test_args = mapi (fn (x,i) => x (nth seqs_of_curr (i+1) rep_rng size)) gens
+                val _ = print (test_args)
+                (* val (test_args, _) = 
                         foldl (fn (x,y) => 
                                let val rnd = x y.1 rep_rng size in
-                               (append y.0 [rnd.raw], rnd.sequence) end)([], x2) gens
+                               (append y.0 [rnd.raw], rnd.sequence) end)([], x2) gens *)
                 val precond_is_met = if (pre <> ()) then (apply_args pre test_args) else true 
             in
                 case (apply_args prop test_args) orelse (precond_is_met = false) of 
@@ -161,14 +172,17 @@ SHRINKING - r
             in
                 {shrunk_ctx = res, count = size} end
 
-    and shrink sequence gens prop pre size = 
-        if foldl (fn (x,y) => (x = 0) andalso y) true sequence then 
-            shrink_aux [sequence] gens prop pre size 
-        else 
-            let val decreased_seqs = dec_all sequence
-                val dec_seqs_w_root = append [sequence] decreased_seqs
-                val res = shrink_aux dec_seqs_w_root gens prop pre size
-            in res end
+    and shrink sequences gens prop pre size = 
+        let val (seqs_comb, seq_lengths) = foldl (fn (x, (seq, lengths)) => ((append seq x), (append lengths [(length x)]))) ([], []) sequences
+        in
+            if foldl (fn (x,y) => (x = 0) andalso y) true sequence then 
+                shrink_aux [sequences] gens prop pre size 
+            else 
+                let val decreased_seqs = dec_all sequence
+                    val dec_seqs_w_root = append [sequence] decreased_seqs
+                    val res = shrink_aux dec_seqs_w_root gens seq_lengths prop pre size
+                in res end
+        end
 (*
 --------------------------------
 GENERATORS - t
@@ -238,11 +252,11 @@ GENERATORS - t
             val x = (int_gen (0, size) y.sequence rng size)
             fun fold f acc 0 = acc 
             | fold f acc i = 
-                let val inst = f() in 
-                fold f (acc.0 ^ inst.raw, (append acc.1 inst.sequence)) (i-1) end
-            val (string, seq) = (fold (fn () => (char_gen ls rng y.raw)) ("", x.sequence) x.raw)
+                let val inst = f acc.1 rng y.raw in 
+                fold f (acc.0 ^ inst.raw, inst.sequence) (i-1) end
+            val (string, seq) = (fold char_gen ("", x.sequence) x.raw)
         in  
-            {raw = string, sequence = seq} (* Not working as it should...  *)
+            {raw = string, sequence = seq}
         end
 
 (* NOTE: Hardcoded for tuple of up to 10 elements *)
@@ -292,18 +306,18 @@ CORE FUNCTIONALITY - a
 *)              
     fun core_forall (generator, prop, 0, size, pre, cap) = {failReason = (), ctx = (), ctx_seq = (), remTests = 0, size = size}
         |core_forall (generator, prop, i, size, pre, cap) =  
-            let val (sequence, raw_args) = foldl (fn (x,y) => 
-                                  let val arg = x y.0 rec_rng size in
-                                  (append y.0 arg.sequence, append y.1 [arg.raw]) end)([],[]) generator 
+            let val (sequences, raw_args) = foldl (fn (x,y) => 
+                                  let val arg = x [] rec_rng size in
+                                  (append y.0 [arg.sequence], append y.1 [arg.raw]) end)([],[]) generator 
              in
                 case pre of 
                     () => 
                         if (apply_args prop raw_args) then (write "."; core_forall (generator, prop, i-1, size+1, pre, cap))
-                        else (write "!"; {failReason = "false_prop", ctx = raw_args, ctx_seq = sequence, remTests = i, size = size})
+                        else (write "!"; {failReason = "false_prop", ctx = raw_args, ctx_seq = sequences, remTests = i, size = size})
                     | _ => 
                         if (apply_args pre raw_args) then 
                             if (apply_args prop raw_args) then (write "."; core_forall (generator, prop, i-1, size+1, pre, cap))
-                            else (write "!"; {failReason = "false_prop", ctx = raw_args, ctx_seq = sequence, remTests = i, size = size})
+                            else (write "!"; {failReason = "false_prop", ctx = raw_args, ctx_seq = sequences, remTests = i, size = size})
                         else 
                         (write "x"; 
                         if (size = cap) andalso (i*5 = cap) then report_error ("cant_satisfy", size)
@@ -796,6 +810,7 @@ CUSTOM TYPE PROGRAM
     val test_seq = [1/6, 1/13]
     val test_res = 16
 in
+
 tc [string(), string()] (append_always_longer, lengths_not_same)
 (* print (shrink test_seq [int_gen(0,100)] (fn x => x < 5) () 10) *)
 
