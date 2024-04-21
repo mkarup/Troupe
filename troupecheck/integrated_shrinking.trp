@@ -237,12 +237,15 @@ GENERATORS - t
     (* return - {raw: list, shrinker: fn {state: string, curr: list, prev: list} => ..: {state: string, curr: list, prev: list}} *)
     fun list_gen (generator) ls rng size = 
         let val length = (int_gen (0, size) ls rng size)
+
             fun fold f acc 0 = acc 
             | fold f (acc, seq) i = 
                 let val inst = f seq rng size in 
                 fold f (append acc [inst.raw], inst.sequence) (i-1) end
-            val (list, seq) = (fold generator ([], length.sequence) length.raw) in 
-        {raw = list, sequence = seq} 
+        
+            val (list, seq) = (fold generator ([], length.sequence) length.raw) 
+        in 
+            {raw = list, sequence = seq} 
         end
 
     (* NOTE: Generates only letters (upper and lower case) and numbers. *)
@@ -262,15 +265,10 @@ GENERATORS - t
 (* NOTE: Generates only strings of letters (upper and lower case) and numbers. *)
     (* return - {raw: string, shrinker: fn {state: string, curr: string, prev: string} => ..: {state: string, curr: string, prev: string}} *)
     fun string_gen ls rng size = 
-        let val y = (int_gen (0, size) ls rng size)
-            val x = (int_gen (0, size) y.sequence rng size)
-            fun fold f acc 0 = acc 
-            | fold f acc i = 
-                let val inst = f acc.1 rng y.raw in 
-                fold f (acc.0 ^ inst.raw, inst.sequence) (i-1) end
-            val (string, seq) = (fold char_gen ("", x.sequence) x.raw)
+        let val {raw, sequence} = list_gen (char_gen) ls rng size
+            val string = foldl (fn (char, str_acc) => str_acc ^ char) "" raw
         in  
-            {raw = string, sequence = seq}
+            {raw = string, sequence = sequence}
         end
 
 (* NOTE: Hardcoded for tuple of up to 10 elements *)
