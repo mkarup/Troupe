@@ -155,13 +155,13 @@ SHRINKING - r
             dec_nth_aux list [] 0 end
     
     fun dec_all seq = 
-        let fun dec_all_aux acc [] i = acc 
-            | dec_all_aux acc (x::xs) i = 
+        let fun dec_all_aux [] i = [] 
+            | dec_all_aux (x::xs) i = 
                 if x = 0 then
-                    dec_all_aux acc xs (i+1)
+                    dec_all_aux xs (i+1)
                 else 
-                    dec_all_aux (append acc [(fn () => (dec_nth seq i))]) xs (i+1) in 
-        dec_all_aux [] seq 0 end
+                    append  [(fn () => (dec_nth seq i))] [fn () => dec_all_aux xs (i+1)] in 
+        dec_all_aux seq 0 end
     
     fun seqs_of_seq sequence lengths = 
         let fun aux seq acc 0 = (acc, seq) 
@@ -179,7 +179,7 @@ SHRINKING - r
 
     fun shrink_aux seqs gens lengths prop pre size counter pid = 
         case seqs of 
-        (x1::x2::xs) => 
+        (x1::x2::x3::xs) => 
             let val seqs_of_curr = seqs_of_seq (x2()) lengths
                 val args_and_leftovers = mapi (fn (i, x) =>
                                         let val _ = send (pid, ("UPDATE_LS", (nth seqs_of_curr (i+1))))
@@ -196,7 +196,7 @@ SHRINKING - r
                 val precond_is_met = if (pre <> ()) then (apply_args pre test_args) else true 
             in
                 case (apply_args prop test_args) orelse (precond_is_met = false) of 
-                true => shrink_aux (x1::xs) gens lengths prop pre size counter pid
+                true => shrink_aux (x1::x3()) gens lengths prop pre size counter pid
                 | false => integrated_shrink ret_seqs gens prop pre size (counter+1) pid
             end  
         | (x::xs) => 
@@ -232,7 +232,7 @@ SHRINKING - r
         end
     
     fun random_shrink_aux sequences generators prop pre success size counter pid =
-        if (counter = 10000) orelse (size = 0) then {count = success, size = size, sequences = sequences} else
+        if (counter = 1000) orelse (size = 0) then {count = success, size = size, sequences = sequences} else
         let val new_size = size-1
             val (shrunk_args, shrunk_sequences) = 
                                         foldl (fn (x, (arg_acc, seq_acc)) => 
@@ -791,7 +791,13 @@ CUSTOM TYPE PROGRAM
 in
 
 (* integrated_shrink seq [program_gen] test_prog_shrink () size 0; *)
-for_i (fn () => tc [program_gen] test_prog_shrink) 5;
+
+tc [list(integer()), integer()] test_bad_insert;
+tc [integer()] (test_bad_half, (fn x => x >= 15));
+tc [string(), string()] (append_always_longer, lengths_not_same);
+tc [record ["theInteger", "theString"] [integer(), string()]] record_shrink_test;
+tc [program_gen] test_prog_shrink;
+
 (* for_i (fn() => tc [program_gen] test_prog_shrink) 50 *)
 (* tc [program_gen] test_prog_shrink *)
 
