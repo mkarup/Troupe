@@ -113,7 +113,7 @@ UTILS - e
 SHRINKING - r
 -------------------------------- 
 *)  
-    fun rep_rng [] = ()
+    fun rep_rng [] = {rnd = 0, seq = []}
     | rep_rng (x::xs) = 
         {rnd = x, seq = xs} 
 
@@ -138,7 +138,7 @@ SHRINKING - r
                 if x = 0 then
                     dec_all_aux acc xs (i+1)
                 else 
-                    dec_all_aux (append acc [(dec_nth seq i)]) xs (i+1) in 
+                    dec_all_aux (append acc [(fn () => (dec_nth seq i))]) xs (i+1) in 
         dec_all_aux [] seq 0 end
     
     fun seqs_of_seq sequence lengths = 
@@ -155,10 +155,10 @@ SHRINKING - r
                 aux xs (append acc [x]) (i-1) in 
         aux list [] idx end 
 
-    fun shrink_aux seqs gens lengths prop pre size = 
+    fun shrink_aux seqs gens lengths prop pre size counter = 
         case seqs of 
         (x1::x2::xs) => 
-            let val seqs_of_curr = seqs_of_seq x2 lengths
+            let val seqs_of_curr = seqs_of_seq (x2()) lengths
                 val call_gens = mapi (fn (i, x) => (x (nth seqs_of_curr (i+1)) rep_rng size)) gens
                 val (test_args, left_over_seqs) = foldl (fn (x, (raws, left_overs)) => (append raws [x.raw], append left_overs [x.sequence])) ([],[]) call_gens
                 val ret_seqs = mapi (fn (i,x) => 
@@ -167,34 +167,54 @@ SHRINKING - r
                 val precond_is_met = if (pre <> ()) then (apply_args pre test_args) else true 
             in
                 case (apply_args prop test_args) orelse (precond_is_met = false) of 
-                true => shrink_aux (x1::xs) gens lengths prop pre size
-                | false => shrink ret_seqs gens prop pre size 
+                true => shrink_aux (x1::xs) gens lengths prop pre size (counter+1)
+                | false => integrated_shrink ret_seqs gens prop pre size (counter+1)
             end  
         | (x::xs) => 
-            let val seqs_of_curr = seqs_of_seq x lengths
-                val test_args = mapi (fn (i, y) => (y (nth seqs_of_curr (i+1)) rep_rng size).raw) gens
+            let val seqs_of_curr = seqs_of_seq (x()) lengths
+                val test_args = mapi (fn (i, y) => let val res = (y (nth seqs_of_curr (i+1)) rep_rng size) in res.raw end) gens
                 val precond_is_met = if (pre <> ()) then (apply_args pre test_args) else true
             in  
-                case (apply_args prop test_args) orelse (precond_is_met = false) of 
+                case (apply_args prop test_args) orelse (precond_is_met = false) orelse (size < 0) of 
                     true => 
-                        let val res = mapi (fn (i, y) => (y (nth seqs_of_curr (i+1)) rep_rng (size+1)).raw) gens in 
-                        {shrunk_ctx = res, count = size} end
-                    | false => shrink seqs_of_curr gens prop pre (size-1) 
+                        let val res = mapi (fn (i, y) => let val res = (y (nth seqs_of_curr (i+1)) rep_rng (size+1)) in res.raw end) gens in 
+                        {shrunk_ctx = res, count = counter} end
+                    | false => shrink_aux [x] gens lengths prop pre (size-1) (counter+1)
                 
             end
 
-    and shrink sequences gens prop pre size = 
+    and integrated_shrink sequences gens prop pre size counter = 
         let val (seqs_comb, seq_lengths) = foldl (fn (x, (seq, lengths)) => ((append seq x), (append lengths [(length x)]))) ([], []) sequences
         in
             if foldl (fn (x,y) => (x = 0) andalso y) true seqs_comb then 
-                shrink_aux [seqs_comb] gens seq_lengths prop pre size 
-            else 
+                shrink_aux [seqs_comb] gens seq_lengths prop pre size counter
+            else  
                 let val decreased_seqs = dec_all seqs_comb
-                    val dec_seqs_w_root = append [seqs_comb] decreased_seqs
-                    val res = shrink_aux dec_seqs_w_root gens seq_lengths prop pre size
+                    val dec_seqs_w_root = append [fn() => seqs_comb] decreased_seqs
+                    val res = shrink_aux dec_seqs_w_root gens seq_lengths prop pre size (counter+1)
                 in 
                 res end
         end
+    
+    fun random_shrink_aux sequence generators prop pre success size counter =
+        if (counter = 10000) orelse (size = 0) then {count = success, size = size, sequences = sequence} else
+        let val new_size = size-1
+            val (shrunk_sequeneces, shrunk_args) = foldl (fn (x, (seq_acc, raw_acc)) =>
+                                        let val res =  x [] rec_rng new_size in
+                                        ((append seq_acc [res.sequence]), (append raw_acc [res.raw])) end)([], []) generators
+            val precond_is_met = if (pre <> ()) then (apply_args pre shrunk_args) else true 
+        in
+            case (apply_args prop shrunk_args) orelse (precond_is_met = false) of
+                true => {count = success, size = size, sequences = sequence}
+                | false =>
+                    random_shrink_aux shrunk_sequeneces generators prop pre (success+1) new_size (counter+1) 
+        end
+
+    fun shrink sequence generators prop pre size counter = 
+        let val res = random_shrink_aux sequence generators prop pre 0 size counter 
+        in 
+        print "testing";
+        integrated_shrink (res.sequences) generators prop pre res.size (res.count) end 
 (*
 --------------------------------
 GENERATORS - t
@@ -204,7 +224,7 @@ GENERATORS - t
     (* TODO: Fix shrinking towards zero -> should shrink towards lowest valid val *)
     fun float_gen (low, high) ls rng size = 
         let val x = rng ls
-            val bool_int = rng x.seq 
+            val bool_int = rng (x.seq) 
             val bool = bool_int.rnd < 1000000/2 
             val float_of_x = x.rnd/1000000
             val lInf = low = 1/0 (* check for inf *)
@@ -223,6 +243,7 @@ GENERATORS - t
         let val res = (float_gen (low, high+1) ls rng size)
             val raw_res = floor (res.raw) 
         in 
+            
             {raw = raw_res, sequence = res.sequence}
         end
     (* return - {raw: bool, shrinker: fn {state: string, curr: bool, prev: bool} => ..: {state: string, curr: bool, prev: bool}} *)
@@ -318,9 +339,9 @@ CORE FUNCTIONALITY - a
 *)              
     fun core_forall (generator, prop, 0, size, pre, cap) = {failReason = (), ctx = (), ctx_seq = (), remTests = 0, size = size}
         |core_forall (generator, prop, i, size, pre, cap) =  
-            let val (sequences, raw_args) = foldl (fn (x,y) => 
+            let val (sequences, raw_args) = foldl (fn (x, (seq_acc, arg_acc)) => 
                                   let val arg = x [] rec_rng size in
-                                  (append y.0 [arg.sequence], append y.1 [arg.raw]) end)([],[]) generator 
+                                  (append seq_acc [arg.sequence], append arg_acc [arg.raw]) end)([],[]) generator 
              in
                 case pre of 
                     () => 
@@ -348,7 +369,7 @@ CORE FUNCTIONALITY - a
                 |_ => 
                     report_fail_reason res noOfTests; 
                     write ("\u001B[1m\u001B[34mShrinking\u001B[0m:");
-                    let val shrink_res = shrink res.ctx_seq generators prop pre res.size in
+                    let val shrink_res = shrink res.ctx_seq generators prop pre res.size 0 in
                     write "\nFailing test case was shrunk to:\n";
                     write (args_toString shrink_res.shrunk_ctx);
                     write ("\nAfter " ^ (toString shrink_res.count) ^ " iterations.\n");
@@ -590,7 +611,7 @@ CUSTOM TYPE PROGRAM
             in
                 append [(var, value)] env
             end
-        | ("print", exp) => (print (toString (eval exp env)); env)
+        | ("print", exp) => (()(* print ("from prog: " ^ (toString (eval exp env)) *); env)
 
     fun interpret prog =
         let fun interpretHelper [] env = env
@@ -647,15 +668,18 @@ CUSTOM TYPE PROGRAM
         end 
 
     fun exp_gen ls nesting_level rng_ls rng size = 
-        let val exp_ts = if length ls = 0 then ["num", "add", "sub", "mul", "div"] else ["num", "var", "add", "sub", "mul", "div"]
+        let val exp_ts = if length ls = 0 then ["num", "add", "sub", "mul", "div"] else ["var", "num", "add", "sub", "mul", "div"]
             val exp_type = if nesting_level = 2 then {raw = "num", sequence = rng_ls} else one_of exp_ts rng_ls rng
         in 
             case exp_type.raw of 
             "num" => 
-                let val value = int_gen(inf, inf) exp_type.sequence rng size in
+                let val interim_value = int_gen(1, inf) exp_type.sequence rng size
+                    val value = int_gen(1, inf) exp_type.sequence rng size in
                 {raw = ("num", value.raw), sequence = value.sequence} end
             | "var" => 
-                let val value = one_of ls exp_type.sequence rng in
+                let val interim_value1 = int_gen(1, inf) exp_type.sequence rng size
+                    val interim_value2 = one_of ls interim_value1.sequence rng
+                    val value = one_of ls interim_value2.sequence rng in
                 {raw = ("var", value.raw), sequence = value.sequence} end 
             |"add" => 
                 let val e1 = exp_gen ls (nesting_level+1) exp_type.sequence rng size 
@@ -697,7 +721,7 @@ CUSTOM TYPE PROGRAM
         end 
 
     fun stmt_gen ls rng_ls rng size = 
-        let val stmt = one_of ["assign", "print"] rng_ls rng
+        let val stmt = one_of ["print", "assign"] rng_ls rng
         in 
             case stmt.raw of
             "assign" => 
@@ -727,9 +751,18 @@ CUSTOM TYPE PROGRAM
     
     fun test_prog_opt prog = 
         (interpret prog) = (interpret (optimize_prog prog))
+    fun test_prog_shrink prog = 
+        (interpret prog) < 100
+    fun for_i body 0 = body() 
+    | for_i body to = body(); for_i body (to-1)
 in
 
-tc [program_gen] test_prog_opt
+
+tc [program_gen] test_prog_shrink
+
+
+(* for_i (fn() => tc [program_gen] test_prog_shrink) 50 *)
+(* tc [program_gen] test_prog_shrink *)
 
 (*
 --------------------------------
