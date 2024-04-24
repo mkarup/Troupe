@@ -194,7 +194,7 @@ SHRINKING - r
                 val precond_is_met = if (pre <> ()) then (apply_args pre test_args) else true 
             in
                 case (apply_args prop test_args) orelse (precond_is_met = false) of 
-                true => shrink_aux (x1::xs) gens lengths prop pre size (counter+1)
+                true => shrink_aux (x1::xs) gens lengths prop pre size counter
                 | false => integrated_shrink ret_seqs gens prop pre size (counter+1)
             end  
         | (x::xs) => 
@@ -212,7 +212,7 @@ SHRINKING - r
                                             val arg = y rng_replayer (size+1) 
                                             in arg end) gens in 
                         {shrunk_ctx = res, count = counter} end
-                    | false => shrink_aux [x] gens lengths prop pre (size-1) (counter+1)
+                    | false => shrink_aux [x] gens lengths prop pre (size-1) counter
                 
             end
 
@@ -224,7 +224,7 @@ SHRINKING - r
             else  
                 let val decreased_seqs = dec_all seqs_comb
                     val dec_seqs_w_root = append [fn() => seqs_comb] decreased_seqs
-                    val res = shrink_aux dec_seqs_w_root gens seq_lengths prop pre size (counter+1)
+                    val res = shrink_aux dec_seqs_w_root gens seq_lengths prop pre size (counter)
                 in 
                 res end
         end
