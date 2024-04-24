@@ -139,7 +139,9 @@ SHRINKING - r
                 hn ("REQUEST_LEFT", senderid) => 
                     let val _ = send (senderid, ls)
                     in rep_rng [] 
-                    end]
+                    end, 
+                hn ("UPDATE_LS", new_ls) => 
+                    rep_rng new_ls]
 
     fun dec_nth list idx = 
         let fun dec_nth_aux [] acc i = acc 
@@ -175,14 +177,14 @@ SHRINKING - r
                 aux xs (append acc [x]) (i-1) in 
         aux list [] idx end 
 
-    fun shrink_aux seqs gens lengths prop pre size counter = 
+    fun shrink_aux seqs gens lengths prop pre size counter pid = 
         case seqs of 
         (x1::x2::xs) => 
             let val seqs_of_curr = seqs_of_seq (x2()) lengths
                 val args_and_leftovers = mapi (fn (i, x) =>
-                                        let val rng_replayer = spawn(fn() => rep_rng (nth seqs_of_curr (i+1)))
-                                            val arg = x rng_replayer size
-                                            val _ = send (rng_replayer, ("REQUEST_LEFT", self()))
+                                        let val _ = send (pid, ("UPDATE_LS", (nth seqs_of_curr (i+1))))
+                                            val arg = x pid size
+                                            val _ = send (pid, ("REQUEST_LEFT", self()))
                                             val left_overs = receive [hn x => x] 
                                         in (arg, left_overs)
                                         end) gens
@@ -194,37 +196,37 @@ SHRINKING - r
                 val precond_is_met = if (pre <> ()) then (apply_args pre test_args) else true 
             in
                 case (apply_args prop test_args) orelse (precond_is_met = false) of 
-                true => shrink_aux (x1::xs) gens lengths prop pre size counter
-                | false => integrated_shrink ret_seqs gens prop pre size (counter+1)
+                true => shrink_aux (x1::xs) gens lengths prop pre size counter pid
+                | false => integrated_shrink ret_seqs gens prop pre size (counter+1) pid
             end  
         | (x::xs) => 
             let val seqs_of_curr = seqs_of_seq (x()) lengths
                 val test_args = mapi (fn (i, y) => 
-                                        let val rng_replayer = spawn (fn() => rep_rng (nth seqs_of_curr (i+1)))
-                                            val arg = y rng_replayer size 
+                                        let val _ = send (pid, ("UPDATE_LS", (nth seqs_of_curr (i+1))))
+                                            val arg = y pid size 
                                             in arg end) gens
                 val precond_is_met = if (pre <> ()) then (apply_args pre test_args) else true
             in  
                 case (apply_args prop test_args) orelse (precond_is_met = false) orelse (size < 0) of 
                     true => 
                         let val res = mapi (fn (i, y) => 
-                                        let val rng_replayer = spawn(fn() => rep_rng (nth seqs_of_curr (i+1)))
-                                            val arg = y rng_replayer (size+1) 
+                                        let val _ = send (pid, ("UPDATE_LS", (nth seqs_of_curr (i+1))))
+                                            val arg = y pid (size+1) 
                                             in arg end) gens in 
                         {shrunk_ctx = res, count = counter} end
-                    | false => shrink_aux [x] gens lengths prop pre (size-1) counter
+                    | false => shrink_aux [x] gens lengths prop pre (size-1) counter pid
                 
             end
 
-    and integrated_shrink sequences gens prop pre size counter = 
+    and integrated_shrink sequences gens prop pre size counter pid = 
         let val (seqs_comb, seq_lengths) = foldl (fn (x, (seq, lengths)) => ((append seq x), (append lengths [(length x)]))) ([], []) sequences
         in
             if foldl (fn (x,y) => (x = 0) andalso y) true seqs_comb then 
-                shrink_aux [seqs_comb] gens seq_lengths prop pre size counter
+                shrink_aux [seqs_comb] gens seq_lengths prop pre size counter pid
             else  
                 let val decreased_seqs = dec_all seqs_comb
                     val dec_seqs_w_root = append [fn() => seqs_comb] decreased_seqs
-                    val res = shrink_aux dec_seqs_w_root gens seq_lengths prop pre size (counter)
+                    val res = shrink_aux dec_seqs_w_root gens seq_lengths prop pre size (counter) pid
                 in 
                 res end
         end
@@ -234,7 +236,7 @@ SHRINKING - r
         let val new_size = size-1
             val (shrunk_args, shrunk_sequences) = 
                                         foldl (fn (x, (arg_acc, seq_acc)) => 
-                                                let val arg = x pid size
+                                                let val arg = x pid new_size
                                                     val _ = send (pid, ("REQUEST_SEQ", self()))
                                                     val seq = receive [hn x => x]
                                                 in (append arg_acc [arg], append seq_acc [seq]) 
@@ -244,14 +246,15 @@ SHRINKING - r
             case (apply_args prop shrunk_args) orelse (precond_is_met = false) of
                 true => random_shrink_aux sequences generators prop pre success size (counter+1) pid
                 | false =>
-                    random_shrink_aux shrunk_sequences generators prop pre (success+1) new_size (counter+1) pid
+                    random_shrink_aux shrunk_sequences generators prop pre (success+1) new_size (0) pid
         end
 
     fun shrink sequence generators prop pre size counter = 
         let val rng_recorder = spawn (fn() => rec_rng [])
             val res = random_shrink_aux sequence generators prop pre 0 size counter rng_recorder
+            val rng_replayer = spawn (fn() => rep_rng [])
         in 
-        integrated_shrink (res.sequences) generators prop pre res.size (res.count) end 
+        integrated_shrink (res.sequences) generators prop pre res.size (res.count) rng_replayer end 
 (*
 --------------------------------
 GENERATORS - t
@@ -788,7 +791,7 @@ CUSTOM TYPE PROGRAM
 in
 
 (* integrated_shrink seq [program_gen] test_prog_shrink () size 0; *)
-tc [program_gen] test_prog_shrink;
+for_i (fn () => tc [program_gen] test_prog_shrink) 5;
 (* for_i (fn() => tc [program_gen] test_prog_shrink) 50 *)
 (* tc [program_gen] test_prog_shrink *)
 
