@@ -113,6 +113,17 @@ UTILS - e
 SHRINKING - r
 -------------------------------- 
 *)  
+    fun produce_rng rng = 
+        receive [hn ("REQUEST_RNG", senderid) => 
+                    let val _ = send (senderid, rng) 
+                    in produce_rng rng end,
+                
+                hn ("UPDATE_RNG", senderid, new_rng) => 
+                    let val _ = send(senderid, "done") in
+                    produce_rng new_rng end]
+
+    val rng_producer = spawn (fn() => produce_rng ())
+
 
     fun rec_rng ls =
     receive [hn ("REQUEST_RND", senderid) =>
@@ -177,13 +188,15 @@ SHRINKING - r
                 aux xs (append acc [x]) (i-1) in 
         aux list [] idx end 
 
-    fun shrink_aux seqs gens lengths prop pre size counter pid = 
-        case seqs of 
+    fun shrink_aux seqs gens lengths prop pre size counter = 
+        let val _ = send(rng_producer, ("REQUEST_RNG", self())) 
+            val pid = receive [hn x => x]
+        in case seqs of 
         (x1::x2::x3::xs) => 
             let val seqs_of_curr = seqs_of_seq (x2()) lengths
                 val args_and_leftovers = mapi (fn (i, x) =>
                                         let val _ = send (pid, ("UPDATE_LS", (nth seqs_of_curr (i+1))))
-                                            val arg = x pid size
+                                            val arg = x size
                                             val _ = send (pid, ("REQUEST_LEFT", self()))
                                             val left_overs = receive [hn x => x] 
                                         in (arg, left_overs)
@@ -196,14 +209,14 @@ SHRINKING - r
                 val precond_is_met = if (pre <> ()) then (apply_args pre test_args) else true 
             in
                 case (apply_args prop test_args) orelse (precond_is_met = false) of 
-                true => shrink_aux (x1::x3()) gens lengths prop pre size counter pid
-                | false => integrated_shrink ret_seqs gens prop pre size (counter+1) pid
+                true => shrink_aux (x1::x3()) gens lengths prop pre size counter
+                | false => integrated_shrink ret_seqs gens prop pre size (counter+1)
             end  
         | (x::xs) => 
             let val seqs_of_curr = seqs_of_seq (x()) lengths
                 val test_args = mapi (fn (i, y) => 
                                         let val _ = send (pid, ("UPDATE_LS", (nth seqs_of_curr (i+1))))
-                                            val arg = y pid size 
+                                            val arg = y size 
                                             in arg end) gens
                 val precond_is_met = if (pre <> ()) then (apply_args pre test_args) else true
             in  
@@ -211,32 +224,35 @@ SHRINKING - r
                     true => 
                         let val res = mapi (fn (i, y) => 
                                         let val _ = send (pid, ("UPDATE_LS", (nth seqs_of_curr (i+1))))
-                                            val arg = y pid (size+1) 
+                                            val arg = y (size+1) 
                                             in arg end) gens in 
                         {shrunk_ctx = res, count = counter} end
-                    | false => shrink_aux [x] gens lengths prop pre (size-1) counter pid
+                    | false => shrink_aux [x] gens lengths prop pre (size-1) counter
                 
-            end
+            end 
+        end
 
-    and integrated_shrink sequences gens prop pre size counter pid = 
+    and integrated_shrink sequences gens prop pre size counter = 
         let val (seqs_comb, seq_lengths) = foldl (fn (x, (seq, lengths)) => ((append seq x), (append lengths [(length x)]))) ([], []) sequences
         in
             if foldl (fn (x,y) => (x = 0) andalso y) true seqs_comb then 
-                shrink_aux [seqs_comb] gens seq_lengths prop pre size counter pid
+                shrink_aux [seqs_comb] gens seq_lengths prop pre size counter
             else  
                 let val decreased_seqs = dec_all seqs_comb
                     val dec_seqs_w_root = append [fn() => seqs_comb] decreased_seqs
-                    val res = shrink_aux dec_seqs_w_root gens seq_lengths prop pre size (counter) pid
+                    val res = shrink_aux dec_seqs_w_root gens seq_lengths prop pre size (counter)
                 in 
                 res end
         end
     
-    fun random_shrink_aux sequences generators prop pre success size counter pid =
+    fun random_shrink_aux sequences generators prop pre success size counter =
         if (counter = 1000) orelse (size = 0) then {count = success, size = size, sequences = sequences} else
-        let val new_size = size-1
+        let val _ = send(rng_producer, ("REQUEST_RNG", self()))
+            val pid = receive [hn x => x]
+            val new_size = size-1
             val (shrunk_args, shrunk_sequences) = 
                                         foldl (fn (x, (arg_acc, seq_acc)) => 
-                                                let val arg = x pid new_size
+                                                let val arg = x new_size
                                                     val _ = send (pid, ("REQUEST_SEQ", self()))
                                                     val seq = receive [hn x => x]
                                                 in (append arg_acc [arg], append seq_acc [seq]) 
@@ -244,17 +260,21 @@ SHRINKING - r
             val precond_is_met = if (pre <> ()) then (apply_args pre shrunk_args) else true 
         in
             case (apply_args prop shrunk_args) orelse (precond_is_met = false) of
-                true => random_shrink_aux sequences generators prop pre success size (counter+1) pid
+                true => random_shrink_aux sequences generators prop pre success size (counter+1)
                 | false =>
-                    random_shrink_aux shrunk_sequences generators prop pre (success+1) new_size (0) pid
+                    random_shrink_aux shrunk_sequences generators prop pre (success+1) new_size (0)
         end
 
     fun shrink sequence generators prop pre size counter = 
         let val rng_recorder = spawn (fn() => rec_rng [])
-            val res = random_shrink_aux sequence generators prop pre 0 size counter rng_recorder
+            val _ = send (rng_producer, ("UPDATE_RNG", self(), rng_recorder))
+            val _ = receive [hn x => ()]
+            val res = random_shrink_aux sequence generators prop pre 0 size counter
             val rng_replayer = spawn (fn() => rep_rng [])
+            val _ = send (rng_producer, ("UPDATE_RNG", self(), rng_replayer))
+            val _ = receive [hn x => ()]
         in 
-        integrated_shrink (res.sequences) generators prop pre res.size (res.count) rng_replayer end 
+        integrated_shrink (res.sequences) generators prop pre res.size (res.count) end 
 (*
 --------------------------------
 GENERATORS - t
@@ -262,8 +282,10 @@ GENERATORS - t
 *)  
     (* return - {raw: number, shrinker: fn {state: string, curr: number, prev: number} => ..: {state: string, curr: number, prev: number}} *)
     (* TODO: Fix shrinking towards zero -> should shrink towards lowest valid val *)
-    fun float_gen (low, high) pid size = 
-        let val _ = send (pid, ("REQUEST_RND", self()))
+    fun float_gen (low, high) size = 
+        let val _ = send (rng_producer, ("REQUEST_RNG", self()))
+            val pid = receive [hn x => x]
+            val _ = send (pid, ("REQUEST_RND", self()))
             val x = receive [hn x => x]
             val _ = send (pid, ("REQUEST_RND", self()))
             val bool_int = receive [hn x => x]
@@ -280,47 +302,47 @@ GENERATORS - t
         in res
         end
     
-    fun int_gen (low, high) pid size = 
-        let val res = floor (float_gen (low, high+1) pid size)
+    fun int_gen (low, high) size = 
+        let val res = floor (float_gen (low, high+1) size)
         in res
         end
 
-    fun bool_gen pid size = 
-        let val rnd = int_gen (0,1) pid size
+    fun bool_gen size = 
+        let val rnd = int_gen (0,1) size
             val res = if rnd = 0 then false
                       else true 
         in res
         end
 
-    fun list_gen (generator) pid size = 
-        let val length = (int_gen (0, size) pid size)
-            val res = make_list ((fn () => generator pid size), length) 
+    fun list_gen (generator) size = 
+        let val length = (int_gen (0, size) size)
+            val res = make_list ((fn () => generator size), length) 
         in res
         end
 
     (* NOTE: Generates only letters (upper and lower case) and numbers. *)
     (* return - {raw: char, shrinker: fn {state: string, curr: char, prev: char} => ..: {state: string, curr: char, prev: char}} *)
-    fun char_gen pid size =
+    fun char_gen size =
         let val chars = 
             ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
             "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
             "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
             "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
             "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
-            val x = (int_gen (1, ((length chars)-1)) pid size)
+            val x = (int_gen (1, ((length chars)-1)) size)
         in nth chars x 
         end
 
 (* NOTE: Generates only strings of letters (upper and lower case) and numbers. *)
-    fun string_gen pid size = 
-        let val char_ls = list_gen (char_gen) pid size
+    fun string_gen size = 
+        let val char_ls = list_gen (char_gen)  size
             val string = list_to_string char_ls
         in string
         end
 
 (* NOTE: Hardcoded for tuple of up to 10 elements *)
-    fun tuple_gen ts pid size = 
-        let val ts_vals = map (fn x => x pid size) ts
+    fun tuple_gen ts size = 
+        let val ts_vals = map (fn x => x size) ts
         in build_tuple ts_vals
         end
 
@@ -328,26 +350,26 @@ GENERATORS - t
 ns: list of strings - will be used as fieldnames
 ts: list of generators - used to generate values for fields 
 *)    
-    fun rec_gen ns ts pid size = 
+    fun rec_gen ns ts size = 
         if (length ns) <> (length ts) then 
             report_error ("record_mismatch", 0)
         else 
-            let val ts_vals = map (fn x => x pid size) ts
+            let val ts_vals = map (fn x => x size) ts
                 val res = build_record ns ts_vals 
             in res
             end 
 
 
-    fun generator_gen pid size = 
-        let val rnd = int_gen (1,7) pid size
+    fun generator_gen size = 
+        let val rnd = int_gen (1,7) size
             val inf = 1/0
-            val res = if rnd = 1 then ((fn i => int_gen (inf, inf) pid i)) else 
-                      if rnd = 2 then ((fn i => bool_gen pid i)) else 
-                      if rnd = 3 then ((fn i => float_gen (inf, inf) pid i)) else
-                      if rnd = 4 then ((fn i => string_gen pid i)) else
-                      if rnd = 5 then ((fn i => char_gen pid i)) else
-                      if rnd = 6 then ((fn i => tuple_gen pid (make_list ((fn () => int_gen(inf, inf) pid i), i)) i)) else
-                     ((fn i => list_gen (int_gen(inf, inf)) pid i)) in
+            val res = if rnd = 1 then ((fn i => int_gen (inf, inf) i)) else 
+                      if rnd = 2 then ((fn i => bool_gen i)) else 
+                      if rnd = 3 then ((fn i => float_gen (inf, inf) i)) else
+                      if rnd = 4 then ((fn i => string_gen i)) else
+                      if rnd = 5 then ((fn i => char_gen i)) else
+                      if rnd = 6 then ((fn i => tuple_gen (make_list ((fn () => int_gen(inf, inf) i), i)) i)) else
+                     ((fn i => list_gen (int_gen(inf, inf)) i)) in
         res end
         
 (* 
@@ -355,10 +377,12 @@ ts: list of generators - used to generate values for fields
 CORE FUNCTIONALITY - a
 -------------------------------- 
 *)              
-    fun core_forall (generators, prop, 0, size, pre, cap, pid) = {failReason = (), ctx = (), ctx_seq = (), remTests = 0, size = size}
-        |core_forall (generators, prop, i, size, pre, cap, pid) =  
-            let val (args, sequences) = foldl (fn (x, (arg_acc, seq_acc)) => 
-                                                let val arg = x pid size
+    fun core_forall (generators, prop, 0, size, pre, cap) = {failReason = (), ctx = (), ctx_seq = (), remTests = 0, size = size}
+        |core_forall (generators, prop, i, size, pre, cap) =  
+            let val _ = send(rng_producer, ("REQUEST_RNG", self()))
+                val pid = receive [hn x => x]
+                val (args, sequences) = foldl (fn (x, (arg_acc, seq_acc)) => 
+                                                let val arg = x size
                                                     val _ = send (pid, ("REQUEST_SEQ", self()))
                                                     val seq = receive [hn x => x]
                                                 in (append arg_acc [arg], append seq_acc [seq]) 
@@ -366,14 +390,14 @@ CORE FUNCTIONALITY - a
             in
                 case pre of 
                     () => 
-                        if (apply_args prop args) then (write "."; core_forall (generators, prop, i-1, size+1, pre, cap, pid))
+                        if (apply_args prop args) then (write "."; core_forall (generators, prop, i-1, size+1, pre, cap))
                         else 
                             let val _ = write "!" 
                             in {failReason = "false_prop", ctx = args, ctx_seq = sequences, remTests = i, size = size} 
                             end
                     | _ => 
                         if (apply_args pre args) then 
-                            if (apply_args prop args) then (write "."; core_forall (generators, prop, i-1, size+1, pre, cap, pid))
+                            if (apply_args prop args) then (write "."; core_forall (generators, prop, i-1, size+1, pre, cap))
                             else 
                                 let val _ = write "!" 
                                 in {failReason = "false_prop", ctx = args, ctx_seq = sequences, remTests = i, size = size} 
@@ -382,7 +406,7 @@ CORE FUNCTIONALITY - a
                         let val _ = write "x"
                         in if (size = cap) andalso (i*5 = cap) then report_error ("cant_satisfy", size)
                             else if size = cap then {failReason = (), ctx = (), ctx_seq = (), remTests = i, size = size}
-                            else core_forall (generators, prop, i, size+1, pre, cap, pid) 
+                            else core_forall (generators, prop, i, size+1, pre, cap) 
                         end
             end
 
@@ -392,7 +416,9 @@ CORE FUNCTIONALITY - a
                     (x,y) => (x,y)
                     | x => (x, ())
             val rng_recorder = spawn (fn() => rec_rng [])
-            val res = core_forall (generators, prop, noOfTests, 0, pre, (noOfTests*5), rng_recorder) in 
+            val _ = send (rng_producer, ("UPDATE_RNG", self(), rng_recorder))
+            val _ = receive [hn x => ()]
+            val res = core_forall (generators, prop, noOfTests, 0, pre, (noOfTests*5)) in 
             case res.failReason of
                 () => write ("\u001B[1m \u001B[32m \nSuccess: \u001B[0mPassed all " ^ (toString noOfTests) ^ " test(s).\n"); true
                 |_ => 
@@ -408,8 +434,17 @@ CORE FUNCTIONALITY - a
     
     fun tc generator p = tc_n generator p 100
 
-    fun troupecheck generator p noOfTests = spawn (fn() => tc_n generator p noOfTests)
-    | troupecheck generator p = spawn (fn() => tc generator p)
+    fun troupecheck props = 
+        let val n = toString (length props)
+            fun tc_aux [] i = exit (authority, 0)
+            | tc_aux (x::xs) i =
+                let val _ = write ("\nRunning test " ^ (toString i) ^ " of " ^ n ^ ":\n")
+                    val self_id = self()
+                    val _ = spawn (fn () => let val res = x() in send(self_id, "done") end )
+                    val _ = receive [hn x => ()] 
+                in tc_aux xs (i+1) end
+        in tc_aux props 1 
+        end
 
 (* 
 --------------------------------
@@ -444,8 +479,8 @@ CONVENIENCE FUNCTIONS - s
     
     fun record ns ts = rec_gen ns ts
 
-    fun one_of ls pid = 
-        let val idx = (int_gen (1, (length ls)) pid ((length ls)))
+    fun one_of ls = 
+        let val idx = (int_gen (1, (length ls)) ((length ls)))
         in 
             (nth ls idx)
         end   
@@ -488,10 +523,10 @@ FUNCTIONS FOR TESTING - d
         if length xs < 10 then append [x] xs else
         xs
 
-    fun one_of_two (x, y) pid size =
-        let val bool = (bool_gen pid size) in
-        if bool then x pid size
-        else y pid size end    
+    fun one_of_two (x, y) size =
+        let val bool = (bool_gen size) in
+        if bool then x size
+        else y size end    
     
     fun bad_half n = 
         if n > 10 then n else n/2
@@ -514,8 +549,7 @@ PROPERTIES FOR TESTING - f
         reverse(reverse xs) = xs
     
     fun int_gen_stays_in_interval i = 
-        let val pid = spawn (fn() => rec_rng []) in 
-        (integer(0, i) pid i) <= i end
+        (integer(0, i) i) <= i 
     
     fun abs_value_is_always_pos i =
         abs_value i >= 0
@@ -527,9 +561,8 @@ PROPERTIES FOR TESTING - f
         my_length xs = length xs
     
     fun make_list_test i = 
-        let val pid = spawn (fn() => rec_rng [])
-            val generator = generator_gen pid i
-            fun f() = generator (int_gen(0, inf) pid i) 
+        let val generator = generator_gen i
+            fun f() = generator (int_gen(0, inf) i) 
             val ls = (make_list (f, i)) in
         (length ls) = i end
     
@@ -698,82 +731,82 @@ CUSTOM TYPE PROGRAM
             append (map optimize_stmt stmts) [optimize_exp exp]
         end 
 
-    fun exp_gen ls nesting_level pid size = 
+    fun exp_gen ls nesting_level size = 
         let val exp_ts = 
             if nesting_level = 2 then ["num"] 
             else (if length ls = 0 then ["num", "add", "sub", "mul", "div"] 
             else ["var", "num", "add", "sub", "mul", "div"])
-            val exp_type = one_of exp_ts pid
+            val exp_type = one_of exp_ts
         in 
             case exp_type of 
             "num" => 
-                let val value = int_gen(1, inf) pid size in
+                let val value = int_gen(1, inf) size in
                 ("num", value) end
             | "var" => 
-                let val value = one_of ls pid in
+                let val value = one_of ls in
                 ("var", value) end 
             |"add" => 
-                let val e1 = exp_gen ls (nesting_level+1) pid size 
-                    val e2 = exp_gen ls (nesting_level+1) pid size
+                let val e1 = exp_gen ls (nesting_level+1) size 
+                    val e2 = exp_gen ls (nesting_level+1) size
                 in
                     ("add", e1, e2)
                 end
             |"sub" => 
-                let val e1 = exp_gen ls (nesting_level+1) pid size 
-                    val e2 = exp_gen ls (nesting_level+1) pid size
+                let val e1 = exp_gen ls (nesting_level+1) size 
+                    val e2 = exp_gen ls (nesting_level+1) size
                 in
                     ("sub", e1, e2)
                 end
             |"mul" => 
-                let val e1 = exp_gen ls (nesting_level+1) pid size 
-                    val e2 = exp_gen ls (nesting_level+1) pid size
+                let val e1 = exp_gen ls (nesting_level+1) size 
+                    val e2 = exp_gen ls (nesting_level+1) size
                 in
                     ("mul", e1, e2)
                 end
             |"div" => 
-                let val e1 = exp_gen ls (nesting_level+1) pid size 
-                    val e2 = exp_gen ls (nesting_level+1) pid size
+                let val e1 = exp_gen ls (nesting_level+1) size 
+                    val e2 = exp_gen ls (nesting_level+1) size
                 in
                     ("div", e1, e2)
                 end  
         end
     
-    fun assign_stmt_gen ls pid size = 
-        let val n = string_gen pid size 
-            val exp = exp_gen ls 0 pid size 
+    fun assign_stmt_gen ls size = 
+        let val n = string_gen size 
+            val exp = exp_gen ls 0 size 
         in
             ("assign", n, exp)
         end 
     
-    fun print_stmt_gen ls pid size = 
-        let val exp = exp_gen ls 0 pid size 
+    fun print_stmt_gen ls size = 
+        let val exp = exp_gen ls 0 size 
         in 
             ("print", exp)
         end 
 
-    fun stmt_gen ls pid size = 
-        let val stmt = one_of ["print", "assign"] pid
+    fun stmt_gen ls size = 
+        let val stmt = one_of ["print", "assign"]
         in 
             case stmt of
             "assign" => 
-                let val res = assign_stmt_gen ls pid size in 
+                let val res = assign_stmt_gen ls size in 
                 res end
             |"print" => 
-                let val res = print_stmt_gen ls pid size in 
+                let val res = print_stmt_gen ls size in 
                 res end
         end 
     
-    fun program_gen pid size = 
-        let val num_of_insts = (int_gen(0, size) pid size)
+    fun program_gen size = 
+        let val num_of_insts = (int_gen(0, size) size)
             fun prog_gen_aux env p 0 = (p, env) 
             | prog_gen_aux env p i = 
-                let val stmt = stmt_gen env pid size 
+                let val stmt = stmt_gen env size 
                     val newEnv = if stmt.0 = "assign" then (append [stmt.1] env) else env
                 in 
                     prog_gen_aux newEnv (append p [stmt]) (i-1)
                 end 
             val (prog_stmts, last_env) = prog_gen_aux [] [] num_of_insts
-            val last_exp = exp_gen last_env 0 pid size
+            val last_exp = exp_gen last_env 0 size
             val prog = append prog_stmts [last_exp]                  
         in 
             prog
@@ -788,15 +821,21 @@ CUSTOM TYPE PROGRAM
 
     val seq = [[267780, 689125, 203803, 618600, 22142, 181797, 268993, 783974, 286438, 440154, 781712, 459460, 962769, 482855, 159926, 418551, 984104, 173034, 540674, 927189, 212169, 718086, 733167, 861479, 102743, 728028, 756405, 33167, 172289, 326962, 170851, 63613, 658659, 592355, 200373, 681450, 464463, 768613, 97359, 366897, 55000, 954642, 56192, 93387, 705644, 488085, 826189, 891989, 524325, 313064, 412008, 797972, 892377, 369868, 883008, 361089, 787380, 821443, 346419, 250197, 301447, 111385, 402424, 327486, 119693, 135341]]
     val size = 11
+
+    fun prop_bad_insert() = tc [list(integer()), integer()] test_bad_insert
+    fun prop_bad_half() = tc [integer()] (test_bad_half, (fn x => x >= 15))
+    fun prop_record_shrink() = tc [record ["theInteger", "theString"] [integer(), string()]] record_shrink_test
+    fun prop_program_shrink() = tc [program_gen] test_prog_shrink
+    fun prop_not_satisfied() = tc [boolean(), boolean()] bool_commutative
 in
 
-(* integrated_shrink seq [program_gen] test_prog_shrink () size 0; *)
+troupecheck [prop_bad_insert, prop_bad_half, prop_not_satisfied, prop_record_shrink, prop_program_shrink]
 
-tc [list(integer()), integer()] test_bad_insert;
+(* tc [list(integer()), integer()] test_bad_insert;
 tc [integer()] (test_bad_half, (fn x => x >= 15));
 tc [string(), string()] (append_always_longer, lengths_not_same);
 tc [record ["theInteger", "theString"] [integer(), string()]] record_shrink_test;
-tc [program_gen] test_prog_shrink;
+tc [program_gen] test_prog_opt; *)
 
 (* for_i (fn() => tc [program_gen] test_prog_shrink) 50 *)
 (* tc [program_gen] test_prog_shrink *)
@@ -850,5 +889,4 @@ write "Testing on my_ceil_2:";
 tc  [float()] my_ceil_2_test;
 write "Testing on both ceil functions:";
 tc  [float()] both_ceil_test *)
-exit (authority, 0)
 end
