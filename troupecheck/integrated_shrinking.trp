@@ -10,7 +10,6 @@ Simple functions for more convenient printing to console.
 let val out = getStdout authority
     fun write x = fwrite (out, x)
 
-
     fun args_toString args = 
         let fun aux_toString acc (x0::x1::xs) = aux_toString (acc ^ (toString x0) ^ ", ") (x1::xs)
             | aux_toString acc (x::xs) = acc ^ (toString x) in 
@@ -153,6 +152,9 @@ Different utility functions that are used across the library.
             | aux (x::xs) acc i = 
                 aux xs (append acc [x]) (i-1) in 
         aux list [] idx end 
+    
+    fun for_i body 0 = body() 
+    | for_i body to = body(); for_i body (to-1)
 (* 
 --------------------------------
 SHRINKING
@@ -445,8 +447,8 @@ Handles running the tests (core_forall), shrinking, preparing the recorder RNG a
                         end
             end
 
-    fun tc (generators, p) = tc (generators, p, 100)
-    | tc (generators, p, noOfTests) = 
+    fun for_all (generators, p) = for_all (generators, p, 100)
+    | for_all (generators, p, noOfTests) = 
         let val (prop, pre) = 
                 case p of    
                     (x,y) => (x,y)
@@ -467,24 +469,25 @@ Handles running the tests (core_forall), shrinking, preparing the recorder RNG a
                     false
                     end
         end
-    
-    (* fun tc generator p = tc_n generator p 100 *)
 
     fun troupecheck props = 
         let val n = toString (length props)
-            fun tc_aux [] i = exit (authority, 0)
-            | tc_aux (x::xs) i =
+            fun troupecheck_aux [] i = exit (authority, 0)
+            | troupecheck_aux (x::xs) i =
                 let val _ = write ("\nRunning test " ^ (toString i) ^ " of " ^ n ^ ":\n")
                     val self_id = self()
                     val _ = spawn (fn () => let val res = x() in send(self_id, "done") end )
                     val _ = receive [hn x => ()] 
-                in tc_aux xs (i+1) end
-        in tc_aux props 1 
+                in troupecheck_aux xs (i+1) end
+        in troupecheck_aux props 1 
         end
 
 (* 
 --------------------------------
-CONVENIENCE FUNCTIONS
+CONVENIENCE FUNCTIONS 
+
+These are functions that make it easier for the user to make use of the different generators, and define their own generators.
+
 -------------------------------- 
 *)
     val inf = 1 / 0
@@ -522,7 +525,10 @@ CONVENIENCE FUNCTIONS
         end   
 (* 
 --------------------------------
-FUNCTIONS FOR TESTING - d
+FUNCTIONS FOR TESTING
+
+These functions exist only to define some test properties later, which are used in the development of TroupeCheck, to make sure it works as expected.
+
 -------------------------------- 
 *) 
     fun my_reverse xs = 
@@ -572,7 +578,10 @@ FUNCTIONS FOR TESTING - d
     
 (*
 --------------------------------
-PROPERTIES FOR TESTING - f
+PROPERTY FUNCTIONS FOR TESTING
+
+See 'FUNCTIONS FOR TESTING'.
+
 -------------------------------- 
 *)
     fun bool_commutative x y = 
@@ -641,7 +650,23 @@ PROPERTIES FOR TESTING - f
 
 (* 
 --------------------------------
-USED FOR USERGUIDE - g
+PROPERTIES FOR TESTING
+
+see 'FUNCTIONS FOR TESTING'.
+
+-------------------------------- 
+ *)
+    fun prop_bad_insert() = for_all ([list(integer()), integer()], test_bad_insert)
+    fun prop_bad_half() = for_all ([integer()], (test_bad_half, (fn x => x >= 15)))
+    fun prop_record_shrink() = for_all ([record ["theInteger", "theString"] [integer(), string()]], record_shrink_test)
+    fun prop_not_satisfied() = for_all ([boolean(), boolean()], bool_commutative)
+    fun prop_count_non_negative() = for_all ([integer(), list(integer())], my_count_returns_non_negative_int, 1000)
+(* 
+--------------------------------
+USED FOR USERGUIDE
+
+Functions used for demonstrating how to use TroupeCheck in the userguide.
+
 -------------------------------- 
 *)
     fun filter_less ([], _) = []
@@ -678,20 +703,32 @@ USED FOR USERGUIDE - g
 
     fun cons_length_increase xs x = 
         (length (x::xs)) = ((length xs) + 1)
+
+
 (*
 --------------------------------
-TC^2 - z
+TC^2
+
+Functions for testing TroupeCheck using TroupeCheck.
+
 -------------------------------- 
 *)
     fun tc_sort_length_always_fails () =    
-        tc ([list(integer())], my_sort_keep_length) = false
+        for_all ([list(integer())], my_sort_keep_length) = false
     
     fun tc_sort_ordered_always_true () =    
-        tc ([list(integer())], my_sort_is_ordered) = true
+        for_all ([list(integer())], my_sort_is_ordered) = true
 
 (*
 --------------------------------
 CUSTOM TYPE PROGRAM
+
+Used for testing the creation of complex custom generators.
+Here we defined an interpreter and generator for simple programs consisting of: 
+expr := ("num", number) |("var", string) |("add", expr, expr) |("sub", expr, expr) |("mul", expr, expr) |("div", expr, expr) 
+stmt := ("assign", string, expr) |("print", expr)
+prog := [[stmt], expr]
+
 -------------------------------- 
 *)
     fun eval exp env =
@@ -852,78 +889,68 @@ CUSTOM TYPE PROGRAM
         (interpret prog) = (interpret (optimize_prog prog))
     fun test_prog_shrink prog = 
         (interpret prog) < 100
-    fun for_i body 0 = body() 
-    | for_i body to = body(); for_i body (to-1)
+    fun prop_program_shrink() = for_all ([program_gen], test_prog_shrink)
 
-    val seq = [[267780, 689125, 203803, 618600, 22142, 181797, 268993, 783974, 286438, 440154, 781712, 459460, 962769, 482855, 159926, 418551, 984104, 173034, 540674, 927189, 212169, 718086, 733167, 861479, 102743, 728028, 756405, 33167, 172289, 326962, 170851, 63613, 658659, 592355, 200373, 681450, 464463, 768613, 97359, 366897, 55000, 954642, 56192, 93387, 705644, 488085, 826189, 891989, 524325, 313064, 412008, 797972, 892377, 369868, 883008, 361089, 787380, 821443, 346419, 250197, 301447, 111385, 402424, 327486, 119693, 135341]]
-    val size = 11
-
-    fun prop_bad_insert() = tc ([list(integer()), integer()], test_bad_insert)
-    fun prop_bad_half() = tc ([integer()], (test_bad_half, (fn x => x >= 15)))
-    fun prop_record_shrink() = tc ([record ["theInteger", "theString"] [integer(), string()]], record_shrink_test)
-    fun prop_program_shrink() = tc ([program_gen], test_prog_shrink)
-    fun prop_not_satisfied() = tc ([boolean(), boolean()], bool_commutative)
-    fun prop_count_non_negative() = tc ([integer(), list(integer())], my_count_returns_non_negative_int, 1000)
 in
 
 troupecheck [prop_bad_insert, prop_bad_half, prop_not_satisfied, prop_record_shrink, prop_program_shrink, prop_count_non_negative]
 
-(* tc [list(integer()), integer()] test_bad_insert;
-tc [integer()] (test_bad_half, (fn x => x >= 15));
-tc [string(), string()] (append_always_longer, lengths_not_same);
-tc [record ["theInteger", "theString"] [integer(), string()]] record_shrink_test;
-tc [program_gen] test_prog_opt; *)
+(* for_all [list(integer()), integer()] test_bad_insert;
+for_all [integer()] (test_bad_half, (fn x => x >= 15));
+for_all [string(), string()] (append_always_longer, lengths_not_same);
+for_all [record ["theInteger", "theString"] [integer(), string()]] record_shrink_test;
+for_all [program_gen] test_prog_opt; *)
 
-(* for_i (fn() => tc [program_gen] test_prog_shrink) 50 *)
-(* tc [program_gen] test_prog_shrink *)
+(* for_i (fn() => for_all [program_gen] test_prog_shrink) 50 *)
+(* for_all [program_gen] test_prog_shrink *)
 
 (*
 --------------------------------
 ALL TESTS - x
 -------------------------------- 
 *)
-(* tc [integer(), integer()] number_commutative *)
+(* for_all [integer(), integer()] number_commutative *)
 (* shrinking tests - x *)
-(* tc [list(integer()), integer()] test_bad_insert;
-tc [integer()] (test_bad_half, (fn x => x >= 15));
-tc [string(), string()] (append_always_longer, lengths_not_same);
-tc [record ["theInteger", "theString"] [integer(), string()]] record_shrink_test; *)
+(* for_all [list(integer()), integer()] test_bad_insert;
+for_all [integer()] (test_bad_half, (fn x => x >= 15));
+for_all [string(), string()] (append_always_longer, lengths_not_same);
+for_all [record ["theInteger", "theString"] [integer(), string()]] record_shrink_test; *)
 
 (* tc^2 tests *)
-(* tc [] tc_sort_ordered_always_true; *)
+(* for_all [] tc_sort_ordered_always_true; *)
 
 (* User guide tests *)
-(* tc [list(integer()), integer()] cons_length_increase;
-tc [list(integer())] my_sort_is_ordered;
-tc [list(integer())] my_sort_keep_length;
-tc [list(integer())] (my_sort_keep_length, no_duplicates) *)
+(* for_all [list(integer()), integer()] cons_length_increase;
+for_all [list(integer())] my_sort_is_ordered;
+for_all [list(integer())] my_sort_keep_length;
+for_all [list(integer())] (my_sort_keep_length, no_duplicates) *)
 
 (* General functionality tests *)
-(* tc [(record ["theInteger", "theString"][integer(), string()]), integer()] rec_test;
-tc [] no_args;
-tc [integer(), integer(), integer(), integer()] tup_test;
+(* for_all [(record ["theInteger", "theString"][integer(), string()]), integer()] rec_test;
+for_all [] no_args;
+for_all [integer(), integer(), integer(), integer()] tup_test;
 write "\nTesting on bools commutative:";
-tc [boolean(), boolean()] bool_commutative;
+for_all [boolean(), boolean()] bool_commutative;
 write "\nTesting on numbers commutative:";
-tc [integer(), integer()] number_commutative;
+for_all [integer(), integer()] number_commutative;
 write "\nTesting on list reverse:";
-tc [list(integer())] list_reverse; 
+for_all [list(integer())] list_reverse; 
 write "\nTesting on int_gen interval:";
-tc [integer()] (int_gen_stays_in_interval, pre_pos);
+for_all [integer()] (int_gen_stays_in_interval, pre_pos);
 write "\nTesting on abs_value:";
-tc  [one_of_two (integer(), float())] abs_value_is_always_pos;
+for_all  [one_of_two (integer(), float())] abs_value_is_always_pos;
 write "\nTesting on my_floor:";
-tc  [float()] my_floor_test; 
+for_all  [float()] my_floor_test; 
 write "\nTesting that my_count always return non-negative result:";
 tc_n [integer(), list(integer())] my_count_returns_non_negative_int 1000;
 write "\nTesting my_length:";
-tc [list(integer())] my_length_test;
+for_all [list(integer())] my_length_test;
 write "\nTesting make_list:";
-tc [pos_integer()] make_list_test;
+for_all [pos_integer()] make_list_test;
 write "Testing on my_ceil_1:";
-tc  [float()] my_ceil_1_test;
+for_all  [float()] my_ceil_1_test;
 write "Testing on my_ceil_2:";
-tc  [float()] my_ceil_2_test;
+for_all  [float()] my_ceil_2_test;
 write "Testing on both ceil functions:";
-tc  [float()] both_ceil_test *)
+for_all  [float()] both_ceil_test *)
 end
