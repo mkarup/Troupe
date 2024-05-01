@@ -3,6 +3,9 @@ import lists
 let fun write x =
     fwrite ((getStdout authority), x)
 
+    fun print_board b = 
+        foldl (fn (x,_) => foldl (fn (y,_) => write (" "^y^" ")) () x; write "\n")() b
+
     fun make_list (f, i) = 
         case i of 
         0 => []
@@ -14,6 +17,8 @@ let fun write x =
         | "B" => 4
         | "S" => 3 
         | "D" => 2
+        | "X" => 1
+        | "O" => 1
 
     fun place_ship board_or_error coordinate = 
         case getType board_or_error of 
@@ -56,16 +61,39 @@ let fun write x =
             val board = foldl (fn (x,y) => place_ship y x) start_board ls 
         in board
         end
+    
+    fun check_attack board (x,y) = 
+        if (x > 10) orelse (y > 10) orelse (x < 1) orelse (y < 1) then "Illegal corrdinate"
+        else 
+            let val coord = nth (nth board y) x 
+            in case coord of 
+            "-" => "Miss"
+            |"O" => "Illegal corrdinate"
+            |"X" => "Illegal corrdinate"
+            |_ => "Hit"
+            end
+    
+    fun do_attack board (x,y) = 
+        case check_attack board (x,y) of 
+        "Illegal corrdinate" => ("Illegal corrdinate", board)
+        | "Miss" => ("Miss", (place_ship board ((x,y), "h", "O")))
+        | "Hit" => ("Hit", (place_ship board ((x,y), "h", "X")))
+    
     val c1 = ((1,1), "h", "C")
     val c2 = ((1,2), "h", "B")
     val c3 = ((10,1), "v", "S")
     val c4 = ((9,1), "v", "S")
     val c5 = ((9,10), "h", "D")
 
-    fun print_board b = 
-        foldl (fn (x,_) => foldl (fn (y,_) => write (" "^y^" ")) () x; write "\n")() b
-    
-    val board_test = make_board [c1, c2, c3, c4, c5]
+    val board_test = make_board [c1,c2,c3,c4,c5]
+
+    val (att, new_board_test) = do_attack board_test (3,1)
+    val (att2, new_board_test2) = do_attack new_board_test (3,3)
 in 
-    print_board (board_test)
+print_board board_test;
+write (att ^ "\n");
+print_board new_board_test;
+write (att2 ^ "\n");
+print_board new_board_test2
+    
 end
