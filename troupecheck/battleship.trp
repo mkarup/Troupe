@@ -1,0 +1,71 @@
+import lists 
+
+let fun write x =
+    fwrite ((getStdout authority), x)
+
+    fun make_list (f, i) = 
+        case i of 
+        0 => []
+        | _ => append (make_list (f, i-1)) [f i]
+    
+    fun bound_from_ship ship = 
+        case ship of 
+        "C" => 5
+        | "B" => 4
+        | "S" => 3 
+        | "D" => 2
+
+    fun place_ship board_or_error coordinate = 
+        case getType board_or_error of 
+        "string" => board_or_error
+        | _ => 
+            let fun place_horizontal (x, y) ship_type board = 
+                    let val y_ls = nth board y
+                        val upperbound = x + (bound_from_ship ship_type)
+                        val is_valid = (x >= 1) andalso (upperbound <= 11)
+                    in if is_valid then 
+                            let val new_y = make_list ((fn i => if (i >= x) andalso (i < upperbound) then ship_type else (nth y_ls i)), 10)                                
+                                val new_board = make_list ((fn i => if i = y then new_y else (nth board i)), 10) 
+                            in new_board 
+                            end 
+                        else
+                            ("Invalid coordinates for ship of type: " ^ ship_type)
+                    end 
+
+                fun place_vertical (x, y) ship_type board = 
+                    let val upperbound = y + (bound_from_ship ship_type)
+                        val is_valid = (x >= 1) andalso (upperbound <= 11)
+                    in if is_valid then 
+                            let val new_board = make_list ((fn i => 
+                                                            if i >= y andalso i < upperbound then 
+                                                                make_list ((fn j => if j = x then ship_type else nth (nth board i) j), 10)
+                                                            else nth board i), 10)
+                            in new_board 
+                            end 
+                        else
+                            ("Invalid coordinates for ship of type: " ^ ship_type)
+                    end 
+                val ((x,y), direction, ship) = coordinate
+            in case direction of
+                "v" => place_vertical (x,y) ship board_or_error
+                | "h" => place_horizontal (x,y) ship board_or_error
+            end
+    
+    fun make_board ls = 
+        let val start_board = make_list ((fn _ => make_list ((fn _ => "-"), 10)), 10)
+            val board = foldl (fn (x,y) => place_ship y x) start_board ls 
+        in board
+        end
+    val c1 = ((1,1), "h", "C")
+    val c2 = ((1,2), "h", "B")
+    val c3 = ((10,1), "v", "S")
+    val c4 = ((9,1), "v", "S")
+    val c5 = ((9,10), "h", "D")
+
+    fun print_board b = 
+        foldl (fn (x,_) => foldl (fn (y,_) => write (" "^y^" ")) () x; write "\n")() b
+    
+    val board_test = make_board [c1, c2, c3, c4, c5]
+in 
+    print_board (board_test)
+end
