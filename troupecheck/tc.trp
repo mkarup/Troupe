@@ -950,7 +950,9 @@ in
 ALL TESTS - x
 -------------------------------- 
 *)
-tc [program_gen] test_prog_opt 
+
+tc [list(integer())] my_sort_keep_length
+(* tc [program_gen] test_prog_opt  *)
 
 (* shrinking tests - x *)
 (* tc [list(integer()), integer()] test_bad_insert;

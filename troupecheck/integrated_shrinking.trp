@@ -323,7 +323,7 @@ However, it can be done if the users wishes to and understands what is going on.
             val _ = send (pid, ("REQUEST_RND", self()))
             val bool_int = receive [hn x => x]
             
-            val bool = bool_int < 1000000/2 
+            val bool = bool_int < (1000000/2) 
             val float_of_x = x/1000000
 
             val lInf = low = 1/0 (* check for inf *)
@@ -704,6 +704,25 @@ Functions used for demonstrating how to use TroupeCheck in the userguide.
     fun cons_length_increase xs x = 
         (length (x::xs)) = ((length xs) + 1)
 
+    fun list_no_duplicates (generator) size = 
+        let val length = (integer(0, size) size)
+            fun no_dups_aux acc 0 = acc
+            | no_dups_aux acc i = 
+                let val value = generator size
+                in if elem value acc 
+                    then no_dups_aux acc i
+                    else no_dups_aux (value::acc) (i-1) 
+                end
+        in no_dups_aux [] length
+        end
+    
+    fun is_ordered_prop() = for_all ([list(integer())], my_sort_is_ordered)
+
+    fun keep_length_prop() = for_all ([list_no_duplicates(integer())], my_sort_keep_length)
+
+    fun keep_length_fixed_prop() = for_all ([list(integer())], (my_sort_keep_length, no_duplicates))
+
+    fun length_increase_prop() = for_all ([list(integer()), integer()], cons_length_increase)
 
 (*
 --------------------------------
@@ -891,9 +910,10 @@ prog := [[stmt], expr]
         (interpret prog) < 100
     fun prop_program_shrink() = for_all ([program_gen], test_prog_shrink)
 
+    
 in
 
-troupecheck [prop_bad_insert, prop_bad_half, prop_not_satisfied, prop_record_shrink, prop_program_shrink, prop_count_non_negative]
+troupecheck [keep_length_prop]
 
 (* for_all [list(integer()), integer()] test_bad_insert;
 for_all [integer()] (test_bad_half, (fn x => x >= 15));
