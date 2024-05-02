@@ -1,0 +1,174 @@
+import lists 
+import troupecheck
+(* 
+--------------------------------
+FUNCTIONS FOR TESTING
+
+These functions exist only to define some test properties later, which are used in the development of TroupeCheck, to make sure it works as expected.
+
+-------------------------------- 
+*) 
+let fun my_reverse xs = 
+        xs
+    
+    fun abs_value x = 
+        if x < 0 then -x else x 
+
+    fun my_floor i =
+        if i >=0 then i - (i mod 1)
+        else i - (i mod 1) - 1
+
+    fun my_length [] = 0
+        | my_length (x::xs) = 1 + (my_length xs)
+
+    fun my_count y [] = 0
+        | my_count y (x::xs) = 
+            let val z = 
+                if y = x then 1 else 0 
+            in 
+            z + my_count y xs end 
+    
+    fun my_floor i =
+        if i >=0 then i - (i mod 1)
+        else i - (i mod 1) - 1
+    
+    fun my_ceil1 i =
+        if i > 0 then i + (1 - (i mod 1))
+        else i + (1 - (i mod 1)) - 1
+    
+    fun my_ceil2 i =
+        if i > 0 then (my_floor i) + 1
+        else if i = 0 then 0
+        else (my_floor i) + 1
+    
+    fun bad_insert xs x = 
+        if length xs < 10 then append [x] xs else
+        xs
+
+    fun one_of_two (x, y) tco size =
+        let val bool = (boolean() tco size) in
+        if bool then x tco size
+        else y tco size end    
+    
+    fun bad_half n = 
+        if n > 10 then n else n/2
+
+    fun string_to_list s = 
+        let fun aux "" acc = acc 
+            | aux s acc = 
+                let val x = substring (s, 0, 1)
+                    val xs = substring (s, 1, 1/0) in 
+                aux xs (append acc [x]) end in 
+        aux s [] end
+    
+    fun string_length s = 
+        length (string_to_list s)
+    
+    fun lengths_not_same s1 s2 = 
+        (string_length s1) <> (string_length s2)   
+
+
+    
+(*
+--------------------------------
+PROPERTY FUNCTIONS FOR TESTING
+
+See 'FUNCTIONS FOR TESTING'.
+
+-------------------------------- 
+*)
+    fun bool_commutative x y = 
+        (x andalso y) = (y andalso x)
+    
+    fun number_commutative x y = 
+        x * y <= 50
+
+    fun list_reverse xs = 
+        reverse(reverse xs) = xs
+    
+    fun int_gen_stays_in_interval i = 
+        i <= 50 
+    
+    fun abs_value_is_always_pos i =
+        abs_value i >= 0
+    
+    fun my_floor_test i =
+        my_floor i = floor i
+
+    fun my_length_test xs = 
+        my_length xs = length xs
+    
+    fun make_list_test generator i = 
+        let fun f() = generator i 
+            val ls = (make_list (f, i)) in
+        (length ls) = i end
+    
+    fun my_count_returns_non_negative_int x xs = 
+        (my_count x xs) >= 0
+    
+    fun rec_test rec i = 
+        {theInteger = rec.theInteger, theString = rec.theString, z = i} = {rec with z = i}
+
+    fun pre_pos x = 
+        x >= 0
+
+    fun my_floor_test i =
+        my_floor i = floor i
+
+    fun my_ceil1_test i =
+        my_ceil1 i = ceil i
+    
+    fun my_ceil2_test i =
+        my_ceil2 i = ceil i
+    
+    fun both_ceil_test i =
+        my_ceil1 i = my_ceil2 i
+    
+    fun shrink_test x y z w = x+y+z+w < 100 (* = w+z+y+x *)
+
+    fun no_args() = true
+
+    fun test_bad_insert xs x =
+        length (bad_insert xs x) = (length xs) + 1 
+    
+    fun test_bad_half n = 
+        n > (bad_half n)
+    
+    fun append_always_longer s1 s2 = 
+        string_length s1 < string_length (s1 ^ s2)
+    
+    fun record_shrink_test r = 
+        r.theInteger < 50
+
+(* 
+--------------------------------
+PROPERTIES FOR TESTING
+
+see 'FUNCTIONS FOR TESTING'.
+
+-------------------------------- 
+ *)
+    fun prop_bad_insert() = for_all ([list(integer()), integer()], test_bad_insert)
+    fun prop_bad_half() = for_all ([integer()], (test_bad_half, (fn x => x >= 15)))
+    fun prop_record_shrink() = for_all ([(record ["theInteger", "theString"] [integer(), string()])], record_shrink_test)
+    fun prop_bool_commutative() = for_all ([boolean(), boolean()], bool_commutative)
+    fun prop_count_non_negative() = for_all ([integer(), list(integer())], my_count_returns_non_negative_int) (* 1000 *)
+    fun prop_rec_test() = for_all ([(record ["theInteger", "theString"][integer(), string()]), integer()], rec_test)
+    fun prop_no_args() = for_all ([], no_args)
+    fun prop_shrink_test() = for_all ([integer(), integer(), integer(), integer()], shrink_test)
+    fun prop_number_commutative() = for_all ([integer(), integer()], number_commutative)
+    fun prop_list_reverse() = for_all ([list(integer())], list_reverse)
+    fun prop_integer_interval_works() = for_all ([integer(0, 50)], (int_gen_stays_in_interval, pre_pos))
+    fun prop_abs_value() = for_all  ([(one_of_two (integer(), float()))], abs_value_is_always_pos)
+    fun prop_floor() = for_all  ([float()], my_floor_test)
+    fun prop_my_length() = for_all ([list(integer())], my_length_test)
+    fun prop_make_list_test() = for_all ([generator(), pos_integer()], make_list_test)
+    fun prop_my_ceil1() = for_all ([float()], my_ceil1_test)
+    fun prop_my_ceil2() = for_all ([float()], my_ceil2_test)
+    fun prop_both_ceil() = for_all ([float()], both_ceil_test)
+
+    val test_list = [prop_bad_insert, prop_bad_half, prop_record_shrink, prop_bool_commutative, prop_count_non_negative, prop_rec_test,
+                     prop_no_args, prop_shrink_test, prop_number_commutative, prop_list_reverse, prop_integer_interval_works, prop_abs_value,
+                     prop_floor, prop_my_length, prop_make_list_test, prop_my_ceil1, prop_my_ceil2, prop_both_ceil]
+in troupecheck test_list authority
+end

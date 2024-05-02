@@ -1,0 +1,67 @@
+import lists
+import troupecheck
+(* 
+--------------------------------
+USED FOR USERGUIDE
+
+Functions used for demonstrating how to use TroupeCheck in the userguide.
+
+-------------------------------- 
+*)
+let fun filter_less ([], _) = []
+    | filter_less ((x::xs), p) = 
+        if x < p then append [x] (filter_less (xs, p)) else (filter_less (xs, p))
+
+    fun filter_greater ([], _) = []
+    | filter_greater ((x::xs), p) = 
+        if x > p then append [x] (filter_greater (xs, p)) else (filter_greater (xs, p))
+
+
+    fun my_quicksort [] = []
+    | my_quicksort (x::xs) =
+        let val smaller = my_quicksort(filter_less(xs, x))
+            val greater = my_quicksort(filter_greater(xs, x)) in 
+        append (append smaller [x]) (greater) end
+    
+    fun ordered [] = true
+    | ordered (x::[]) = true 
+    | ordered (x::y::ys) = 
+        if x <= y then ordered (y::ys) else false
+
+    fun my_sort_is_ordered xs = 
+        ordered (my_quicksort xs) 
+    
+    fun my_sort_keep_length xs = 
+        length xs = length (my_quicksort(xs))
+    
+    fun pre_list_size_greater_than_one xs = 
+        if (length xs) <= 1 then false else true
+    
+    fun no_duplicates[] = true 
+    | no_duplicates (x::xs) = if (elem x xs) then false else no_duplicates xs
+
+    fun cons_length_increase xs x = 
+        (length (x::xs)) = ((length xs) + 1)
+
+    fun list_no_duplicates (generator) tco size = 
+        let val length = (integer(0, size) tco size)
+            fun no_dups_aux acc 0 = acc
+            | no_dups_aux acc i = 
+                let val value = generator tco size
+                in if elem value acc 
+                    then no_dups_aux acc i
+                    else no_dups_aux (value::acc) (i-1) 
+                end
+        in no_dups_aux [] length
+        end
+    
+    fun is_ordered_prop() = for_all ([list(integer())], my_sort_is_ordered)
+
+    fun keep_length_prop() = for_all ([list(integer())], my_sort_keep_length)
+
+    fun keep_length_fixed_prop() = for_all ([list(integer())], (my_sort_keep_length, no_duplicates))
+
+    fun length_increase_prop() = for_all ([list(integer()), integer()], cons_length_increase)
+in 
+troupecheck [keep_length_prop, length_increase_prop] authority
+end

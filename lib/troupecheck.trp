@@ -413,7 +413,7 @@ However, it can be done if the users wishes to and understands what is going on.
         if (length ns) <> (length ts) then 
             report_error ("record_mismatch", 0) tco
         else  
-            let val ts_vals = map (fn x => x size) ts
+            let val ts_vals = map (fn x => x tco size) ts
                 val res = build_record ns ts_vals 
             in res
             end 
@@ -540,6 +540,8 @@ These are functions that make it easier for the user to make use of the differen
 
     fun char () = char_gen
 
+    fun generator() = generator_gen
+
     fun tuple ts = tuple_gen ts
     
     fun record ns ts = rec_gen ns ts
@@ -566,6 +568,7 @@ in
     , ("list", list)
     , ("string", string)
     , ("char", char)
+    , ("generator", generator)
     , ("tuple", tuple)
     , ("record", record)
     , ("one_of", one_of)
