@@ -82,9 +82,26 @@ Different utility functions that are used across the library.
         else x :: (remove_nth n xs (i + 1))
     
     fun make_list (f, i) = 
-        case i of 
-        0 => []
-        | _ => append [f()] (make_list (f, i-1))
+        let fun make_ls_aux (f_aux, n)= 
+            case n of 
+                0 => []
+                | _ => append [f_aux()] (make_ls_aux (f_aux, n-1))
+            val i1 = floor (i/4)
+            val i2 = i1
+            val i3 = i1
+            val i4 = i - (i1+i2+i3)
+            val self_id = self()
+            val _ = spawn (fn () => let val res = make_ls_aux (f, i1) in send(self_id, ("l1", res)) end) 
+            val _ = spawn (fn () => let val res = make_ls_aux (f, i2) in send(self_id, ("l2", res)) end) 
+            val _ = spawn (fn () => let val res = make_ls_aux (f, i3) in send(self_id, ("l3", res)) end) 
+            val _ = spawn (fn () => let val res = make_ls_aux (f, i4) in send(self_id, ("l4", res)) end) 
+            val interim1 = receive [hn ("l1", x) => x]
+            val interim2 = receive [hn ("l2", x) => x]
+            val interim3 = receive [hn ("l3", x) => x]
+            val interim4 = receive [hn ("l4", x) => x]
+            val res = append (append (append interim1 interim2) interim3) interim4
+        in res 
+        end
     
     fun abs_value x = 
     if x < 0 then -x else x 
@@ -152,7 +169,7 @@ Different utility functions that are used across the library.
             | dec_nth_aux (x::xs) acc i =
                 case i = idx of 
                 true =>
-                    let val dec_val = if x-1 <= 0 then 0 else floor (x/2) in
+                    let val dec_val = if x <= 1/1000000 then 0 else x/2 in
                     dec_nth_aux xs (append acc [dec_val]) (i+1) end
                 | false => dec_nth_aux xs (append acc [x]) (i+1)
         in  
@@ -207,15 +224,15 @@ All of these functions are spawned and then requests or updates may be send to t
                     produce_rng new_rng end]
 
     fun rec_rng ls =
-    receive [hn ("REQUEST_RND", senderid) =>
-                let val rnd = floor (random()*1000000) 
-                    val _ = send (senderid, rnd) 
-                    in rec_rng (append ls [rnd])
-                    end, 
-            hn ("REQUEST_SEQ", senderid) => 
-                let val _ = send (senderid, ls)
-                in rec_rng []
-                end]
+        receive [hn ("REQUEST_RND", senderid) =>
+                    let val rnd = random()
+                        val _ = send (senderid, rnd) 
+                        in rec_rng (append ls [rnd])
+                        end, 
+                hn ("REQUEST_SEQ", senderid) => 
+                    let val _ = send (senderid, ls)
+                    in rec_rng []
+                    end]
     
     fun rep_rng ls = 
         receive [hn ("REQUEST_RND", senderid) => 
@@ -348,18 +365,18 @@ However, it can be done if the users wishes to and understands what is going on.
             val _ = send (pid, ("REQUEST_RND", self()))
             val bool_int = receive [hn x => x]
             
-            val bool = bool_int < (1000000/2) 
-            val float_of_x = x/1000000
+            val bool = bool_int < (1/2) 
+            (* val float_of_x = x/1000000 *)
 
             val lInf = low = 1/0 (* check for inf *)
             val hInf = high = 1/0
 
             val res = 
                 case (lInf, hInf) of 
-                    (true, true) => if bool then float_of_x * size else -float_of_x * size
-                    | (true, false) => high - (float_of_x * size) 
-                    | (false, true) => low + (float_of_x * size)
-                    | (false, false) => low + (float_of_x * (high-low)) 
+                    (true, true) => if bool then x * size else -x * size
+                    | (true, false) => high - (x * size) 
+                    | (false, true) => low + (x * size)
+                    | (false, false) => low + (x * (high-low)) 
         in res
         end
     
