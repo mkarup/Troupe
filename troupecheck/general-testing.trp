@@ -124,7 +124,7 @@ See 'FUNCTIONS FOR TESTING'.
     fun both_ceil_test i =
         my_ceil1 i = my_ceil2 i
     
-    fun shrink_test x y z w = x+y+z+w < 100 (* = w+z+y+x *)
+    fun shrink_test x y z w = x+y+z+w < 100
 
     fun no_args() = true
 

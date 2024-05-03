@@ -81,25 +81,23 @@ Different utility functions that are used across the library.
         if n = i then xs
         else x :: (remove_nth n xs (i + 1))
     
+    fun divide_list_work f length num_workers = 
+        let fun make_infols acc 1 = append acc [(length - (floor(length/num_workers) * (num_workers-1)))]
+            | make_infols acc i = 
+                make_infols (append acc [floor(length/num_workers)]) (i-1)
+            val infols = make_infols [] num_workers
+            val _ = map (fn x => spawn(fn()=> f x)) infols 
+            val res = foldl (fn (_,y) => let val res = receive[hn x => x] in append res y end)[] infols in 
+        res end
+
     fun make_list (f, i) = 
         let fun make_ls_aux (f_aux, n)= 
             case n of 
                 0 => []
                 | _ => append [f_aux()] (make_ls_aux (f_aux, n-1))
-            val i1 = floor (i/4)
-            val i2 = i1
-            val i3 = i1
-            val i4 = i - (i1+i2+i3)
             val self_id = self()
-            val _ = spawn (fn () => let val res = make_ls_aux (f, i1) in send(self_id, ("l1", res)) end) 
-            val _ = spawn (fn () => let val res = make_ls_aux (f, i2) in send(self_id, ("l2", res)) end) 
-            val _ = spawn (fn () => let val res = make_ls_aux (f, i3) in send(self_id, ("l3", res)) end) 
-            val _ = spawn (fn () => let val res = make_ls_aux (f, i4) in send(self_id, ("l4", res)) end) 
-            val interim1 = receive [hn ("l1", x) => x]
-            val interim2 = receive [hn ("l2", x) => x]
-            val interim3 = receive [hn ("l3", x) => x]
-            val interim4 = receive [hn ("l4", x) => x]
-            val res = append (append (append interim1 interim2) interim3) interim4
+            fun func (l) = let val res = make_ls_aux (f, l) in send (self_id, (res)) end
+            val res = divide_list_work func i 4
         in res 
         end
     
@@ -309,11 +307,11 @@ All of these functions are spawned and then requests or updates may be send to t
                 res end
         end
     
-    fun random_shrink_aux sequences generators prop pre success size counter tco =
+    fun random_shrink_aux sequences generators prop pre success size counter divi tco =
         if (counter = 1000) orelse (size = 0) then {count = success, size = size, sequences = sequences} else
         let val _ = send(tco, ("REQUEST_RNG", self()))
             val pid = receive [hn x => x]
-            val new_size = size-1
+            val new_size = floor (size/divi)
             val (shrunk_args, shrunk_sequences) = 
                                         foldl (fn (x, (arg_acc, seq_acc)) => 
                                                 let val arg = x tco new_size
@@ -324,16 +322,16 @@ All of these functions are spawned and then requests or updates may be send to t
             val precond_is_met = if (pre <> ()) then (apply_args pre shrunk_args tco) else true 
         in
             case (apply_args prop shrunk_args tco) orelse (precond_is_met = false) of
-                true => random_shrink_aux sequences generators prop pre success size (counter+1) tco
+                true => random_shrink_aux sequences generators prop pre success size (counter+1) (divi+2) tco
                 | false =>
-                    random_shrink_aux shrunk_sequences generators prop pre (success+1) new_size (0) tco
+                    random_shrink_aux shrunk_sequences generators prop pre (success+1) new_size (0) 2 tco
         end
 
     fun shrink sequence generators prop pre size counter tco = 
         let val rng_recorder = spawn (fn() => rec_rng [])
             val _ = send (tco, ("UPDATE_RNG", self(), rng_recorder))
             val _ = receive [hn x => ()]
-            val res = random_shrink_aux sequence generators prop pre 0 size counter tco
+            val res = random_shrink_aux sequence generators prop pre 0 size counter 2 tco
             val rng_replayer = spawn (fn() => rep_rng [])
             val _ = send (tco, ("UPDATE_RNG", self(), rng_replayer))
             val _ = receive [hn x => ()]
