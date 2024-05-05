@@ -17,8 +17,6 @@ let fun write x =
         | "B" => 4
         | "S" => 3 
         | "D" => 2
-        | "X" => 1
-        | "O" => 1
 
     fun update_board board_or_error coordinate = 
         case getType board_or_error of 
@@ -62,62 +60,69 @@ let fun write x =
         in board
         end
     
-    fun check_attack board (x,y) = 
-        if (x > 10) orelse (y > 10) orelse (x < 1) orelse (y < 1) then "Illegal corrdinate"
-        else 
-            let val coord = nth (nth board y) x 
-            in case coord of 
-            "-" => "Miss"
-            |"O" => "Illegal corrdinate"
-            |"X" => "Illegal corrdinate"
-            |_ => "Hit"
-            end
-    
-    fun do_attack board (x,y) = 
-        case check_attack board (x,y) of 
-        "Illegal corrdinate" => ("Illegal corrdinate", board)
-        | "Miss" => ("Miss", (update_board board ((x,y), "h", "O")))
-        | "Hit" => ("Hit", (update_board board ((x,y), "h", "X")))
     
     val c1 = ((1,1), "h", "C")
     val c2 = ((1,2), "h", "B")
     val c3 = ((10,1), "v", "S")
     val c4 = ((9,1), "v", "S")
     val c5 = ((9,10), "h", "D")
-
-    fun player board game =
-        receive [hn ("YOURTURN", senderid) => 
-                    let val _ = write "\nIt's your turn. Please pick what column: \n>"
-                        val x_attack = inputLine()
-                        val _ = "\nPlease pick the row: \n>"
-                        val y_attack = inputLine()
-                        val _ = send(senderid, ("ATTACK", (stringToInt(x_attack), stringToInt(y_attack))))
-                    in player board game
-                    end, 
-                
-                hn ("ILLEGAL", senderid) => 
-                    let val _ = write "\nYour move was illegal. Please pick a column again: \n>"
-                        val x_attack = inputLine()
-                        val _ = "\nPlease pick the row: \n>"
-                        val y_attack = inputLine()
-                        val _ = send(senderid, ("ATTACK", (stringToInt(x_attack), stringToInt(y_attack))))
-                    in player board game
-                    end, 
-
-                hn (("ATTACK_RESP", x), senderid) =>
-                    let val _ = write ("\nYour move was a " ^ x ^ "!")
-                        val _ = write ("\nWaiting for other player to attack...\n")
-                    in player board game 
+         
+    fun player() =
+        receive [hn ("STARTING", player_num) => 
+                    let val _ = write "\nBoth players have joined. Player 1 starts.\n"
+                        val _ = write ("\nYou are player " ^ (toString player_num) ^ ".\n")
+                    in player()
                     end,
-                
-                hn (("ATTACK", x), senderid) => 
-                    let val (msg, new_board) = do_attack board x 
-                        val _ = send (senderid, ("ATTACK_RESP", msg))
-                        in player new_board game
+
+                hn ("YOURTURN", senderid) => 
+                    let val _ = write "\nPlease pick x-coordinate of attack: \n>"
+                        val x_attack = inputLine()
+                        val _ = write "\nPlease pick y-coordinate of attack: \n>"
+                        val y_attack = inputLine()
+                        val (x, y) = 
+                            let pini authority 
+                                val res = (stringToInt(x_attack), stringToInt(y_attack))
+                                val _ = debugpc()
+                                in res 
+                                end
+                        val _ = send(senderid, ("ATTACK", (x,y)))
+                    in player()
+                    end, 
+
+                hn (("ATTACK_RESP", msg), senderid) =>
+                    case msg of 
+                    "Illegal coordinate" => 
+                        let val _ = write ("\nIllegal attack coordinate! Try with another coordinate...\n")
+                        in player()
                         end
+                    |_ => 
+                        let val _ = write ("\nYour move was a " ^ msg ^ "!")
+                            val _ = write ("\nWaiting for opponent to attack...\n")
+                        in player ()
+                        end,
+                
+                hn ("UPDATE_MSG", coords, msg, new_board) => 
+                    let val _ = write ("\nOpponent attacked (" ^ (toString coords.0) ^ ", " ^ (toString coords.1) ^").")
+                    in case msg of 
+                    "Illegal coordinate" => 
+                        let val _ = write ("\nThis is an illegal attack coordinate! Wait for opponent to try again...\n")
+                        in player()
+                        end
+                    |_ => 
+                        let val _ = print_board new_board
+                            val _ = write ("\nThis move was a " ^ msg ^ "!")
+                            val _ = write ("\nIt is now your turn.\n")
+                        in player()
+                        end
+                    end
                 ]
 
-in 
+    fun join() = 
+        let val board = make_board [c1, c2, c3, c4, c5] 
+            val game = whereis ("@battleship-game", "battleship")
+            val _ = send(game, ("JOINING", board, self()))
+        in player() 
+        end
 
-    
+in join() 
 end

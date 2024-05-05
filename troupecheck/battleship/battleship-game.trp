@@ -1,0 +1,71 @@
+import lists 
+
+let fun write x =
+    fwrite ((getStdout authority), x)
+
+    fun print_board b = 
+        foldl (fn (x,_) => foldl (fn (y,_) => write (" "^y^" ")) () x; write "\n")() b
+
+    fun make_row (f, i) = 
+        case i of 
+        0 => []
+        | _ => append (make_row (f, i-1)) [f i]
+
+    fun update_board board (x,y) marker = 
+        let val y_ls = nth board y
+            val new_y = make_row ((fn i => if (i = x) then marker else (nth y_ls i)), 10)                                
+            val new_board = make_row ((fn i => if i = y then new_y else (nth board i)), 10) 
+        in new_board 
+        end 
+    
+    fun check_attack board (x,y) = 
+        if (x > 10) orelse (y > 10) orelse (x < 1) orelse (y < 1) then "Illegal coordinate"
+        else 
+            let val coord = nth (nth board y) x 
+            in case coord of 
+            "-" => "Miss"
+            |"O" => "Illegal coordinate"
+            |"X" => "Illegal coordinate"
+            |_ => "Hit"
+            end
+    
+    fun do_attack board (x,y) = 
+        case check_attack board (x,y) of 
+        "Illegal coordinate" => ("Illegal coordinate", board)
+        | "Miss" => ("Miss", (update_board board (x,y) "O"))
+        | "Hit" => ("Hit", (update_board board (x,y) "X"))
+    
+    fun switch_turn turn = 
+        if turn = 1 then 2 else 1
+
+    fun game p1 p2 turn =
+        let val player_in = if turn = 1 then p1 else p2
+            val player_out = if turn = 1 then p2 else p1
+            val _ = send(player_in.id, ("YOURTURN", self()))
+        in 
+        receive [hn (("ATTACK", x), senderid) => 
+                    let val (msg, new_board) = do_attack player_out.board x 
+                        val next_turn = if msg = "Illegal coordinate" then turn else switch_turn turn
+                        val _ = send (senderid, ("ATTACK_RESP", msg))
+                        val _ = send (player_out.id, ("UPDATE_MSG", x, msg, new_board))
+                        in if next_turn = 1 
+                            then game {p1 with board = new_board} p2 next_turn 
+                            else game p1 {p2 with board = new_board} next_turn
+                        end
+                ]
+        end
+    
+    val _ = register ("battleship", self(), authority)
+
+    fun setup p1 count = 
+        receive [hn ("JOINING", board, senderid) => 
+                    case count of 
+                     1 =>
+                        let val p2 = {board = board, id = senderid}
+                            val _ = send (p1.id, ("STARTING", 1))
+                            val _ = send (p2.id, ("STARTING", 2)) 
+                        in game p1 p2 1
+                        end
+                    |0 => setup {board = board, id = senderid} (count+1)]
+in setup {} 0
+end
