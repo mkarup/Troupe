@@ -46,7 +46,7 @@ let fun write x =
         receive [hn (("ATTACK", x), senderid) => 
                     let val (msg, new_board) = do_attack player_out.board x 
                         val next_turn = if msg = "Illegal coordinate" then turn else switch_turn turn
-                        val _ = send (senderid, ("ATTACK_RESP", msg))
+                        val _ = send (senderid, (("ATTACK_RESP", msg), self()))
                         val _ = send (player_out.id, ("UPDATE_MSG", x, msg, new_board))
                         in if next_turn = 1 
                             then game {p1 with board = new_board} p2 next_turn 

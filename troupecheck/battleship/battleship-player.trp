@@ -1,9 +1,10 @@
 import lists 
-
+import stdio
 let fun write x =
     fwrite ((getStdout authority), x)
 
     fun print_board b = 
+        write "\n";
         foldl (fn (x,_) => foldl (fn (y,_) => write (" "^y^" ")) () x; write "\n")() b
 
     fun make_row (f, i) = 
@@ -76,16 +77,11 @@ let fun write x =
 
                 hn ("YOURTURN", senderid) => 
                     let val _ = write "\nPlease pick x-coordinate of attack: \n>"
-                        val x_attack = inputLine()
+                        val x_attack = inputLineAtLevel authority `{}` 
                         val _ = write "\nPlease pick y-coordinate of attack: \n>"
-                        val y_attack = inputLine()
-                        val (x, y) = 
-                            let pini authority 
-                                val res = (stringToInt(x_attack), stringToInt(y_attack))
-                                val _ = debugpc()
-                                in res 
-                                end
-                        val _ = send(senderid, ("ATTACK", (x,y)))
+                        val y_attack = inputLineAtLevel authority `{}`
+                        val (x, y) = (stringToInt(x_attack), stringToInt(y_attack))
+                        val _ = send(senderid, (("ATTACK", (x,y)), self()))
                     in player()
                     end, 
 
