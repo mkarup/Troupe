@@ -55,18 +55,36 @@ let fun write x =
                 | "h" => place_horizontal (x,y) ship board_or_error
             end
     
+    fun for_i body acc 0 = acc.0 
+    | for_i body acc to = for_i body (body acc) (to-1)
+
+    fun ship_coords_from_info info = 
+        let val (org_x, org_y) = info.0
+            val count = (bound_from_ship info.2)-1
+        in case info.1 of
+        "h" =>  
+            let val coords = for_i (fn acc => (append acc.0 [((acc.1)+1, org_y)], (acc.1)+1)) ([info.0], org_x) count
+            in coords 
+            end 
+        |"v" => 
+            let val coords = for_i (fn acc => (append acc.0 [(org_x, (acc.1)+1)], (acc.1)+1)) ([info.0], org_y) count
+            in coords 
+            end 
+        end
+             
+
     fun make_board ls = 
         let val start_board = make_row ((fn _ => make_row ((fn _ => "-"), 10)), 10)
-            val board = foldl (fn (x,y) => update_board y x) start_board ls 
-        in board
+            val (board, ships) = foldl (fn (x,(board_acc, ships_acc)) => (update_board board_acc x, append ships_acc [ship_coords_from_info x])) (start_board, []) ls 
+        in (board, ships)
         end
     
     
-    val c1 = ((1,1), "h", "C")
-    val c2 = ((1,2), "h", "B")
-    val c3 = ((10,1), "v", "S")
-    val c4 = ((9,1), "v", "S")
-    val c5 = ((9,10), "h", "D")
+    val c1 = ((3,2), "h", "C")
+    val c2 = ((2,3), "v", "S")
+    val c3 = ((8,9), "h", "D")
+    val c4 = ((3,5), "v", "B")
+    val c5 = ((8,3), "h", "D")
          
     fun player() =
         receive [hn ("STARTING", player_num) => 
@@ -110,13 +128,25 @@ let fun write x =
                             val _ = write ("\nIt is now your turn.\n")
                         in player()
                         end
+                    end,
+                
+                hn "YOUWON" => 
+                    let val _ = write ("\nCongratulations! You sank all the opponent's ships. You are the Winner!\n")
+                    in exit (authority, 0)
+                    end,
+                
+                hn ("YOULOST", new_board, coords) => 
+                    let val _ = write ("\nOpponent attacked (" ^ (toString coords.0) ^ ", " ^ (toString coords.1) ^").")
+                        val _ = print_board new_board
+                        val _ = write ("\nToo bad! The opponent sank all your ships. You lost...\n")
+                    in exit (authority, 0)
                     end
                 ]
 
     fun join() = 
-        let val board = make_board [c1, c2, c3, c4, c5] 
+        let val (board, ships) = make_board [c1,c2,c3,c4, c5] 
             val game = whereis ("@battleship-game", "battleship")
-            val _ = send(game, ("JOINING", board, self()))
+            val _ = send(game, ("JOINING", board, ships, self()))
         in player() 
         end
 

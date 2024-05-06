@@ -1,5 +1,5 @@
 import lists 
-
+import timeout
 let fun write x =
     fwrite ((getStdout authority), x)
 
@@ -29,11 +29,24 @@ let fun write x =
             |_ => "Hit"
             end
     
-    fun do_attack board (x,y) = 
+    fun update_ship ship (x,y) = 
+        let val res = foldl (fn (z,w) => if z = (x,y) then w else append w [z]) [] ship
+        in res 
+        end
+
+
+    fun update_ships ships (x,y) = 
+        let val interim_ships = map (fn z => update_ship z (x,y)) ships
+            val res =  foldl (fn (z,w) => if (length z) = 0 then w else (append w [z])) [] interim_ships
+        in res
+        end
+
+
+    fun do_attack board ships (x,y) = 
         case check_attack board (x,y) of 
-        "Illegal coordinate" => ("Illegal coordinate", board)
-        | "Miss" => ("Miss", (update_board board (x,y) "O"))
-        | "Hit" => ("Hit", (update_board board (x,y) "X"))
+        "Illegal coordinate" => ("Illegal coordinate", board, ships)
+        | "Miss" => ("Miss", (update_board board (x,y) "O"), ships)
+        | "Hit" => ("Hit", (update_board board (x,y) "X"), (update_ships ships (x,y)))
     
     fun switch_turn turn = 
         if turn = 1 then 2 else 1
@@ -44,13 +57,20 @@ let fun write x =
             val _ = send(player_in.id, ("YOURTURN", self()))
         in 
         receive [hn (("ATTACK", x), senderid) => 
-                    let val (msg, new_board) = do_attack player_out.board x 
+                    let val (msg, new_board, new_ships) = do_attack player_out.board player_out.ships x 
                         val next_turn = if msg = "Illegal coordinate" then turn else switch_turn turn
-                        val _ = send (senderid, (("ATTACK_RESP", msg), self()))
-                        val _ = send (player_out.id, ("UPDATE_MSG", x, msg, new_board))
-                        in if next_turn = 1 
-                            then game {p1 with board = new_board} p2 next_turn 
-                            else game p1 {p2 with board = new_board} next_turn
+                        in if length new_ships = 0 then 
+                            let val _ = send (senderid, "YOUWON")
+                                val _ = send (player_out.id, ("YOULOST", new_board, x))
+                            in exitAfterTimeout authority 10 0 "Game has ended."
+                            end
+                        else 
+                            let val _ = send (senderid, (("ATTACK_RESP", msg), self()))
+                                val _ = send (player_out.id, ("UPDATE_MSG", x, msg, new_board))
+                            in if next_turn = 1 
+                                then game {p1 with board = new_board, ships = new_ships} p2 next_turn 
+                                else game p1 {p2 with board = new_board, ships = new_ships} next_turn
+                            end
                         end
                 ]
         end
@@ -58,14 +78,15 @@ let fun write x =
     val _ = register ("battleship", self(), authority)
 
     fun setup p1 count = 
-        receive [hn ("JOINING", board, senderid) => 
+        receive [hn ("JOINING", board, ships, senderid) => 
                     case count of 
                      1 =>
-                        let val p2 = {board = board, id = senderid}
+                        let val p2 = {board = board, id = senderid, ships = ships}
                             val _ = send (p1.id, ("STARTING", 1))
                             val _ = send (p2.id, ("STARTING", 2)) 
                         in game p1 p2 1
                         end
-                    |0 => setup {board = board, id = senderid} (count+1)]
+                    |0 => 
+                        setup {board = board, id = senderid, ships = ships} (count+1)]
 in setup {} 0
 end
