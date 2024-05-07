@@ -106,13 +106,22 @@ Different utility functions that are used across the library.
 
 (* TODO: handle when arguments are passed to a property that does not take arguments *)
     fun apply_args p l tco =
-        case l of 
-            [] => boolean_check (p()) tco; p() (* this case is only reached if there are no generators to begin with *)
-            | (x::xs) => 
-                let val res = foldl (fn (x,y) => function_not_done_check y tco; y x) p l in
-                boolean_check res tco;
-                res 
+        let val _ = send (tco, ("REQUEST_AUTH", self()))
+            val auth = receive [hn x => x]
+        in case l of 
+            [] =>  (* this case is only reached if there are no generators to begin with *)
+                let val _ = boolean_check (p()) tco
+                    val res = p() 
+                    val _ = blockdecl auth 
+                in declassify (res, auth, `{}`) 
                 end
+            | (x::xs) => 
+                let val res = foldl (fn (x,y) => function_not_done_check y tco; y x) p l
+                    val _ = boolean_check res tco
+                    val _ = blockdecl auth
+                in declassify (res, auth, `{}`) 
+            end
+        end
     
     fun string_to_list s = 
         let fun aux "" acc = acc 

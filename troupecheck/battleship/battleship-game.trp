@@ -263,10 +263,8 @@ Testing the game host using TroupeCheck
         end
 
     fun test_do_attack_no_leak (board, ships) = 
-        let val auth = attenuate (authority, (levelOf board))
-            val res = ((levelOf board) = (levelOf ships)) andalso ((levelOf board) = (levelOf (do_attack board ships (1,2))))
-            val _ = blockdecl authority
-        in declassify (res, authority, `{}`) 
+        let val res = ((levelOf board) = (levelOf ships)) andalso ((levelOf board) = (levelOf (do_attack board ships (1,2))))
+        in res
         end 
 
     fun prop_do_att_test() = 
