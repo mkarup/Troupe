@@ -1,5 +1,6 @@
 import lists 
 import timeout
+import troupecheck
 let fun write x =
     fwrite ((getStdout authority), x)
 
@@ -81,12 +82,194 @@ let fun write x =
         receive [hn ("JOINING", board, ships, senderid) => 
                     case count of 
                      1 =>
-                        let val p2 = {board = board, id = senderid, ships = ships}
+                        let val p2 = {board = (board raisedTo `{p2}`), id = senderid, ships = (ships raisedTo `{p2}`)}
                             val _ = send (p1.id, ("STARTING", 1))
                             val _ = send (p2.id, ("STARTING", 2)) 
                         in game p1 p2 1
                         end
                     |0 => 
-                        setup {board = board, id = senderid, ships = ships} (count+1)]
-in setup {} 0
+                        setup {board = (board raisedTo `{p1}`), id = senderid, ships = (ships raisedTo `{p1}`)} (count+1)]
+    
+(* 
+----------------------------
+Testing the game host using TroupeCheck
+----------------------------
+*)
+    fun for_i body acc 0 = acc.0 
+    | for_i body acc to = for_i body (body acc) (to-1)
+
+    fun write x =
+    fwrite ((getStdout authority), x)
+
+    fun bound_from_ship ship = 
+        case ship of 
+        "C" => 5
+        | "B" => 4
+        | "S" => 3 
+        | "D" => 2
+
+    fun print_board b = 
+        write "\n";
+        foldl (fn (x,_) => foldl (fn (y,_) => write (" "^y^" ")) () x; write "\n")() b
+    
+    fun make_row (f, i) = 
+        case i of 
+        0 => []
+        | _ => append (make_row (f, i-1)) [f i]
+
+    fun update_board_creation board_or_error coordinate = 
+        case getType board_or_error of 
+        "string" => board_or_error
+        | _ => 
+            let fun place_horizontal (x, y) ship_type board = 
+                    let val y_ls = nth board y
+                        val upperbound = x + (bound_from_ship ship_type)
+                        val is_valid = (x >= 1) andalso (upperbound <= 11)
+                    in if is_valid then 
+                            let val new_y = make_row ((fn i => if (i >= x) andalso (i < upperbound) then ship_type else (nth y_ls i)), 10)                                
+                                val new_board = make_row ((fn i => if i = y then new_y else (nth board i)), 10) 
+                            in new_board 
+                            end 
+                        else
+                            ("Invalid coordinates for ship of type: " ^ ship_type)
+                    end 
+
+                fun place_vertical (x, y) ship_type board = 
+                    let val upperbound = y + (bound_from_ship ship_type)
+                        val is_valid = (x >= 1) andalso (upperbound <= 11)
+                    in if is_valid then 
+                            let val new_board = make_row ((fn i => 
+                                                            if i >= y andalso i < upperbound then 
+                                                                make_row ((fn j => if j = x then ship_type else nth (nth board i) j), 10)
+                                                            else nth board i), 10)
+                            in new_board 
+                            end 
+                        else
+                            ("Invalid coordinates for ship of type: " ^ ship_type)
+                    end 
+                val ((x,y), direction, ship) = coordinate
+            in case direction of
+                "v" => place_vertical (x,y) ship board_or_error
+                | "h" => place_horizontal (x,y) ship board_or_error
+            end
+
+    fun ship_coords_from_info info = 
+        let val (org_x, org_y) = info.0
+            val count = (bound_from_ship info.2)-1
+        in case info.1 of
+        "h" =>  
+            let val coords = for_i (fn acc => (append acc.0 [((acc.1)+1, org_y)], (acc.1)+1)) ([info.0], org_x) count
+            in coords 
+            end 
+        |"v" => 
+            let val coords = for_i (fn acc => (append acc.0 [(org_x, (acc.1)+1)], (acc.1)+1)) ([info.0], org_y) count
+            in coords 
+            end 
+        end
+
+    fun make_board ls = 
+        let val start_board = make_row ((fn _ => make_row ((fn _ => "-"), 10)), 10)
+            val (board, ships) = foldl (fn (x,(board_acc, ships_acc)) => (update_board_creation board_acc x, append ships_acc [ship_coords_from_info x])) (start_board, []) ls 
+        in  
+            (board, ships)
+        end
+    
+
+    fun ship_gen taken_coords ship_type tco size = 
+        let val dir = one_of ["h", "v"] tco size 
+            val ship_size = bound_from_ship ship_type
+            fun ship_gen_aux direction = 
+                case direction of 
+                "h" => 
+                let val x = integer(1, (ship_size+1)) tco size
+                    val y = integer(1, 10) tco size 
+                    in if length taken_coords = 0 then 
+                        (x,y) 
+                    else 
+                        let val ship_coords = ship_coords_from_info ((x,y), dir, ship_type)
+                            val ship_coords_not_used = foldl (fn (x,y) => if elem x taken_coords then false else (true andalso y)) true ship_coords
+                        in 
+                            if ship_coords_not_used then 
+                                (x,y) 
+                            else 
+                                ship_gen_aux direction 
+                        end
+                    end
+
+                | "v" => 
+                    let val x = integer(1, 10) tco size
+                        val y = integer(1, (ship_size+1)) tco size 
+                    in if length taken_coords = 0 then 
+                        (x,y) 
+                    else 
+                        let val ship_coords = ship_coords_from_info ((x,y), dir, ship_type)
+                            val ship_coords_not_used = foldl (fn (x,y) => if elem x taken_coords then false else (true andalso y)) true ship_coords
+                        in 
+                            if ship_coords_not_used then 
+                                (x,y) 
+                            else 
+                                ship_gen_aux direction 
+                        end
+                    end 
+            in (ship_gen_aux dir, dir, ship_type)
+            end
+        
+    fun board_gen tco size = 
+        let val carrier = ship_gen [] "C" tco size  
+            val fst_taken = ship_coords_from_info carrier 
+            val battleshp = ship_gen fst_taken "B" tco size
+            val snd_taken = append fst_taken (ship_coords_from_info battleshp)
+            val sub1 = ship_gen snd_taken "S" tco size
+            val thrd_taken = append snd_taken (ship_coords_from_info sub1)
+            val sub2 = ship_gen thrd_taken "S" tco size
+            val frth_taken = append thrd_taken (ship_coords_from_info sub2)
+            val destroyer = ship_gen frth_taken "D" tco size
+            val ship_ls = [carrier, battleshp, sub1, sub2, destroyer]
+            val (board, ships) = make_board ship_ls
+        in (board, ships)
+        end
+    
+    (* fun init_tc auth rng =  
+        receive [hn ("REQUEST_RNG", senderid) => 
+                    let val _ = send (senderid, rng) 
+                    in init_tc auth rng end,
+
+                hn ("REQUEST_AUTH", senderid) => 
+                    let val _ = send (senderid, auth) 
+                    in init_tc auth rng end,
+
+                hn ("UPDATE_RNG", senderid, new_rng) => 
+                    let val _ = send(senderid, "done") in
+                    init_tc auth new_rng end]
+    fun rec_rng ls =
+        receive [hn ("REQUEST_RND", senderid) =>
+                    let val rnd = random()
+                        val _ = send (senderid, rnd) 
+                        in rec_rng (append ls [rnd])
+                        end, 
+                hn ("REQUEST_SEQ", senderid) => 
+                    let val _ = send (senderid, ls)
+                    in rec_rng []
+                    end]
+        
+    val rng_recorder = spawn (fn() => rec_rng [])
+    val tco = spawn (fn() => init_tc authority rng_recorder) *)
+    (* val (board, ships) = board_gen tco 10 *)
+
+    fun labeled_value_gen labels value_gen tco size = 
+        let val inst = value_gen tco size 
+            val lab = one_of labels tco size 
+        in inst raisedTo lab
+        end
+
+    fun test_do_attack_no_leak (board, ships) = 
+        let val auth = attenuate (authority, (levelOf board))
+            val res = ((levelOf board) = (levelOf ships)) andalso ((levelOf board) = (levelOf (do_attack board ships (1,2))))
+            val _ = blockdecl authority
+        in declassify (res, authority, `{}`) 
+        end 
+
+    fun prop_do_att_test() = 
+        for_all ([(labeled_value_gen[`{alice}`, `{bob}`] board_gen)], test_do_attack_no_leak)
+in troupecheck[prop_do_att_test] authority
 end

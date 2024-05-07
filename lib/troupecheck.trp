@@ -571,10 +571,10 @@ These are functions that make it easier for the user to make use of the differen
     
     fun record ns ts = rec_gen ns ts
 
-    fun one_of ls = 
-        let val idx = (int_gen (1, (length ls)) ((length ls)))
+    fun one_of ls tco size = 
+        let val idx = (int_gen (1, (length ls)) tco size)
         in 
-            (nth ls idx)
+            (nth ls idx)   
         end   
 in 
     [ ("make_list", make_list)
