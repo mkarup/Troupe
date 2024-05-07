@@ -185,10 +185,12 @@ Different utility functions that are used across the library.
     fun seqs_of_seq sequence lengths = 
         let fun aux seq acc 0 = (acc, seq) 
             | aux (x::xs) acc n = 
-                aux xs (append acc [x]) (n-1) in 
-        (foldl (fn (x,(acc, s)) => 
+                aux xs (append acc [x]) (n-1) 
+            val (res, _) = (foldl (fn (x,(acc, s)) => 
                                 let val (curr_acc, curr_seq) = aux s [] x in 
-                                (append acc [curr_acc], curr_seq) end)([], sequence) lengths).0 end
+                                (append acc [curr_acc], curr_seq) end)([], sequence) lengths)
+        in res 
+        end
 
     fun cutoff_at list idx = 
         let fun aux ls acc 0 = acc
@@ -261,10 +263,10 @@ All of these functions are spawned and then requests or updates may be send to t
                                             val arg = x tco size
                                             val _ = send (pid, ("REQUEST_LEFT", self()))
                                             val left_overs = receive [hn x => x] 
-                                        in (arg, left_overs)
+                                        in {arg = arg, left_overs = left_overs}
                                         end) gens
 
-                val (test_args, left_over_seqs) = foldl (fn (x, (raws, left_overs)) => (append raws [x.0], append left_overs [x.1])) ([],[]) args_and_leftovers
+                val (test_args, left_over_seqs) = foldl (fn (x, (raws, left_overs)) => (append raws [x.arg], append left_overs [x.left_overs])) ([],[]) args_and_leftovers
                 val ret_seqs = mapi (fn (i,x) => 
                                         if (length x) = 0 then (nth seqs_of_curr (i+1)) 
                                         else cutoff_at (nth seqs_of_curr (i+1)) ((nth lengths (i+1))-(length x))) left_over_seqs
