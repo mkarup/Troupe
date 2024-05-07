@@ -491,8 +491,8 @@ Handles running the tests (core_forall), shrinking, preparing the recorder RNG a
                         end
             end
 
-    fun for_all (generators, p) auth = for_all (generators, p, 100) auth
-    | for_all (generators, p, noOfTests) auth = 
+    fun for_all (generators, p, to_shrink) auth = for_all (generators, p, to_shrink, 100) auth
+    | for_all (generators, p, to_shrink, noOfTests) auth = 
         let val (prop, pre) = 
                 case p of    
                     (x,y) => (x,y)
@@ -504,13 +504,16 @@ Handles running the tests (core_forall), shrinking, preparing the recorder RNG a
                 () => write ("\u001B[1m \u001B[32m \nSuccess: \u001B[0mPassed all " ^ (toString noOfTests) ^ " test(s).\n") auth; true
                 |_ => 
                     report_fail_reason res noOfTests tco; 
-                    write ("\u001B[1m\u001B[34mShrinking\u001B[0m:") auth;
-                    let val shrink_res = shrink res.ctx_seq generators prop pre res.size 0 tco in
-                    write "\nFailing test case was shrunk to:\n" auth;
-                    write (args_toString shrink_res.shrunk_ctx) auth;
-                    write ("\nAfter " ^ (toString shrink_res.count) ^ " iterations.\n") auth;
-                    false
-                    end
+                    if to_shrink then 
+                        (write ("\u001B[1m\u001B[34mShrinking\u001B[0m:") auth;
+                        let val shrink_res = shrink res.ctx_seq generators prop pre res.size 0 tco in
+                        write "\nFailing test case was shrunk to:\n" auth;
+                        write (args_toString shrink_res.shrunk_ctx) auth;
+                        write ("\nAfter " ^ (toString shrink_res.count) ^ " iterations.\n") auth;
+                        false
+                        end)
+                    else 
+                        false
         end
 
     fun troupecheck props auth = 
