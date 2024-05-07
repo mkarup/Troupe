@@ -149,7 +149,7 @@ see 'FUNCTIONS FOR TESTING'.
 -------------------------------- 
  *)
     fun prop_bad_insert() = for_all ([list(integer()), integer()], test_bad_insert)
-    fun prop_bad_half() = for_all ([integer()], (test_bad_half, (fn x => x >= 15)))
+    fun prop_bad_half() = for_all_noshrink ([integer()], (test_bad_half, (fn x => x >= 15)))
     fun prop_record_shrink() = for_all ([(record ["theInteger", "theString"] [integer(), string()])], record_shrink_test)
     fun prop_bool_commutative() = for_all ([boolean(), boolean()], bool_commutative)
     fun prop_count_non_negative() = for_all ([integer(), list(integer())], my_count_returns_non_negative_int) (* 1000 *)

@@ -491,8 +491,7 @@ Handles running the tests (core_forall), shrinking, preparing the recorder RNG a
                         end
             end
 
-    fun for_all (generators, p, to_shrink) auth = for_all (generators, p, to_shrink, 100) auth
-    | for_all (generators, p, to_shrink, noOfTests) auth = 
+    fun run_tests (generators, p, to_shrink, noOfTests) auth = 
         let val (prop, pre) = 
                 case p of    
                     (x,y) => (x,y)
@@ -515,6 +514,12 @@ Handles running the tests (core_forall), shrinking, preparing the recorder RNG a
                     else 
                         false
         end
+
+    fun for_all (generators, p) auth = run_tests (generators, p, true, 100) auth 
+    | for_all (generators, p, noOfTests) auth = run_tests (generators, p, true, noOfTests) auth 
+
+    fun for_all_noshrink (generators, p) auth = run_tests (generators, p, false, 100) auth 
+    | for_all_noshrink (generators, p, noOfTests) auth = run_tests (generators, p, false, noOfTests) auth 
 
     fun troupecheck props auth = 
         let val n = toString (length props)
@@ -576,6 +581,7 @@ in
     , ("build_record", build_record)
     , ("build_tuple", build_tuple)
     , ("for_all", for_all)
+    , ("for_all_noshrink", for_all_noshrink)
     , ("troupecheck", troupecheck)
     , ("inf", inf)
     , ("integer", integer)
