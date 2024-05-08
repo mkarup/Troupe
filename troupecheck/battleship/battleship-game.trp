@@ -46,11 +46,30 @@ let fun write x =
     fun do_attack board ships (x,y) = 
         case check_attack board (x,y) of 
         "Illegal coordinate" => ("Illegal coordinate", board, ships)
-        | "Miss" => ("Miss", (update_board board (x,y) "O"), ships)
-        | "Hit" => ("Hit", (update_board board (x,y) "X"), (update_ships ships (x,y)))
+        | "Miss" => 
+            let val updated_board = (update_board board (x,y) "O")
+            in ("Miss", updated_board, ships)
+            end
+        | "Hit" => 
+            let val updated_board = (update_board board (x,y) "X")
+                val updated_ships = (update_ships ships (x,y))
+            in ("Hit", updated_board, updated_ships)
+            end
     
     fun switch_turn turn = 
         if turn = 1 then 2 else 1
+    
+    fun declassify_board board = 
+        let val _ = blockdecl authority
+            val board_decl = (declassify(board, authority, `{}`))
+            val res = map (fn x => 
+                                let val x_decl = (declassify(x, authority, `{}`))
+                                    in map (fn y => 
+                                                declassify(y, authority, `{}`)) x_decl
+                                    end) board_decl
+        in res 
+        end
+            
 
     fun game p1 p2 turn =
         let val player_in = if turn = 1 then p1 else p2
@@ -59,16 +78,20 @@ let fun write x =
         in 
         receive [hn (("ATTACK", x), senderid) => 
                     let val (msg, new_board, new_ships) = do_attack player_out.board player_out.ships x 
-                        val next_turn = if msg = "Illegal coordinate" then turn else switch_turn turn
-                        in if length new_ships = 0 then 
+                        val _ = blockdecl authority
+                        val msg_decl = declassify (msg, authority, `{}`)
+                        val ships_decl = declassify (new_ships, authority, `{}`)
+                        val board_decl = declassify_board new_board (* (new_board, authority, `{}`) *)
+                        val next_turn = if msg_decl = "Illegal coordinate" then turn else switch_turn turn
+                        in if length ships_decl = 0 then 
                             let val _ = send (senderid, "YOUWON")
-                                val _ = send (player_out.id, ("YOULOST", new_board, x))
+                                val _ = send (player_out.id, ("YOULOST", board_decl, x))
                             in exitAfterTimeout authority 10 0 "Game has ended."
                             end
                         else 
-                            let val _ = send (senderid, (("ATTACK_RESP", msg), self()))
-                                val _ = send (player_out.id, ("UPDATE_MSG", x, msg, new_board))
-                            in if next_turn = 1 
+                            let val _ = send (senderid, (("ATTACK_RESP", msg_decl), self()))
+                                val _ = send (player_out.id, ("UPDATE_MSG", x, msg_decl, board_decl))
+                            in if turn = 2 
                                 then game {p1 with board = new_board, ships = new_ships} p2 next_turn 
                                 else game p1 {p2 with board = new_board, ships = new_ships} next_turn
                             end
@@ -214,7 +237,7 @@ Testing the game host using TroupeCheck
             in (ship_gen_aux dir, dir, ship_type)
             end
         
-    fun board_gen tco size = 
+    fun board_ships_gen tco size = 
         let val carrier = ship_gen [] "C" tco size  
             val fst_taken = ship_coords_from_info carrier 
             val battleshp = ship_gen fst_taken "B" tco size
@@ -229,7 +252,20 @@ Testing the game host using TroupeCheck
         in (board, ships)
         end
     
-    (* fun init_tc auth rng =  
+    fun attack_gen tco size = 
+        (integer(1, 10) tco size, integer(1,10) tco size)
+
+    fun test_do_attack_no_leak (board, ships) attack = 
+        let val interim_res1 = ((levelOf board) = (levelOf ships)) 
+            val interim_res2 = ((levelOf board) = (levelOf (do_attack board ships attack)))
+        in (interim_res1 andalso interim_res2)
+        end 
+
+    fun prop_do_att_test() = 
+        for_all ([(labeled_value [`{alice}`, `{bob}`] board_ships_gen), attack_gen], test_do_attack_no_leak)
+    
+    
+    fun init_tc auth rng =  
         receive [hn ("REQUEST_RNG", senderid) => 
                     let val _ = send (senderid, rng) 
                     in init_tc auth rng end,
@@ -253,20 +289,24 @@ Testing the game host using TroupeCheck
                     end]
         
     val rng_recorder = spawn (fn() => rec_rng [])
-    val tco = spawn (fn() => init_tc authority rng_recorder) *)
-    (* val (board, ships) = board_gen tco 10 *)
+    val tco = spawn (fn() => init_tc authority rng_recorder)
+    val (board, ships) = board_ships_gen tco 10
+    (*fun playerfun() = 
+        receive [hn ("YOURTURN", senderid) => let val _ = print "YOURTURN" 
+                                         val _ = send(senderid, (("ATTACK", (1,2)), self()))
+                                         in playerfun() end, 
+                hn x => let val _ = print x in playerfun() end]
+    val p1_id = spawn (fn() => playerfun())
+    val p2_id = spawn (fn() => playerfun())
+    val p1 = 
+        let val (board, ships) = board_ships_gen tco 10
+        in {board = (board raisedTo `{p1}`), id = p1_id, ships = (ships raisedTo `{p1}`)}
+        end
+    val p2 = 
+        let val (board, ships) = board_ships_gen tco 10
+        in {board = (board raisedTo `{p2}`), id = p2_id, ships = (ships raisedTo `{p2}`)}
+        end
+    val game = spawn(fn () => game p1 p2 1) *)
 
-    
-    
-    fun attack_gen tco size = 
-        (integer(1, 10) tco size, integer(1,10) tco size)
-
-    fun test_do_attack_no_leak (board, ships) attack = 
-        let val res = ((levelOf board) = (levelOf ships)) andalso ((levelOf board) = (levelOf (do_attack board ships attack)))
-        in res
-        end 
-
-    fun prop_do_att_test() = 
-        for_all ([(labeled_value [`{alice}`, `{bob}`] board_gen), attack_gen], test_do_attack_no_leak)
 in troupecheck[prop_do_att_test] authority
 end
