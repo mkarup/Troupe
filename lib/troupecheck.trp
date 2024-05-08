@@ -363,7 +363,8 @@ for random decisions (i.e. a call to float_gen/float() or int_gen/integer()), in
 However, it can be done if the users wishes to and understands what is going on.
 
 -------------------------------- 
-*)  
+*)   
+    
     fun float_gen (low, high) tco size = 
         let val _ = send (tco, ("REQUEST_RNG", self()))
             val pid = receive [hn x => x]
@@ -393,6 +394,12 @@ However, it can be done if the users wishes to and understands what is going on.
         let val res = floor (float_gen (low, high+1) tco size)
         in res
         end
+    
+    fun one_of ls tco size = 
+        let val idx = (int_gen (1, (length ls)) tco size)
+        in 
+            (nth ls idx)   
+        end  
 
     fun bool_gen tco size = 
         let val rnd = int_gen (0,1) tco size
@@ -443,6 +450,12 @@ However, it can be done if the users wishes to and understands what is going on.
                 val res = build_record ns ts_vals 
             in res
             end 
+    
+    fun labeled_value_gen labels value_gen tco size = 
+        let val inst = value_gen tco size 
+            val lab = one_of labels tco size 
+        in inst raisedTo lab
+        end
 
     (* TODO: needs to be completed... *)
     fun generator_gen tco size = 
@@ -578,17 +591,14 @@ These are functions that make it easier for the user to make use of the differen
 
     fun tuple ts = tuple_gen ts
     
-    fun record ns ts = rec_gen ns ts
+    fun labeled_value ls gen = labeled_value_gen ls gen 
 
-    fun one_of ls tco size = 
-        let val idx = (int_gen (1, (length ls)) tco size)
-        in 
-            (nth ls idx)   
-        end   
+    fun record ns ts = rec_gen ns ts
 in 
     [ ("make_list", make_list)
     , ("build_record", build_record)
     , ("build_tuple", build_tuple)
+    , ("one_of", one_of)
     , ("for_all", for_all)
     , ("for_all_noshrink", for_all_noshrink)
     , ("troupecheck", troupecheck)
@@ -605,7 +615,7 @@ in
     , ("char", char)
     , ("generator", generator)
     , ("tuple", tuple)
+    , ("labeled_value", labeled_value)
     , ("record", record)
-    , ("one_of", one_of)
     ]
 end

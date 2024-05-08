@@ -256,18 +256,17 @@ Testing the game host using TroupeCheck
     val tco = spawn (fn() => init_tc authority rng_recorder) *)
     (* val (board, ships) = board_gen tco 10 *)
 
-    fun labeled_value_gen labels value_gen tco size = 
-        let val inst = value_gen tco size 
-            val lab = one_of labels tco size 
-        in inst raisedTo lab
-        end
+    
+    
+    fun attack_gen tco size = 
+        (integer(1, 10) tco size, integer(1,10) tco size)
 
-    fun test_do_attack_no_leak (board, ships) = 
-        let val res = ((levelOf board) = (levelOf ships)) andalso ((levelOf board) = (levelOf (do_attack board ships (1,2))))
+    fun test_do_attack_no_leak (board, ships) attack = 
+        let val res = ((levelOf board) = (levelOf ships)) andalso ((levelOf board) = (levelOf (do_attack board ships attack)))
         in res
         end 
 
     fun prop_do_att_test() = 
-        for_all ([(labeled_value_gen[`{alice}`, `{bob}`] board_gen)], test_do_attack_no_leak)
+        for_all ([(labeled_value [`{alice}`, `{bob}`] board_gen), attack_gen], test_do_attack_no_leak)
 in troupecheck[prop_do_att_test] authority
 end
