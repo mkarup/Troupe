@@ -215,7 +215,7 @@ SHRINKING
 
 Works by first using random shrinking when a failing example has been found (shrink & random_shrink_aux). 
 Random shrinking means simply generating new test cases with gradually smaller size, to find a case smaller than the original one. This rarely produces a minmal result.
-The smallest randomly shrunk instance is then further shrunk using integrated shrinking. (integrated_shrink & shrink_aux)
+The smallest randomly shrunk instance is then further shrunk using integrated shrinking. (internal_shrink & shrink_aux)
 Integrated shrinking means keeping track of all random decision made during generation, and then re-generating with smaller "random" decisions.
 
 This part of the code also contains the functionality for recording all random decisions, and replaying these random decisions (produce_rng, rc_rng & rep_rng).
@@ -264,12 +264,9 @@ All of these functions are spawned and then requests or updates may be send to t
     fun shrink_aux seqs gens lengths prop pre size counter tco = 
         let val _ = send(tco, ("REQUEST_RNG", self())) 
             val pid = receive [hn x => x]
-            val _ = send (tco, ("REQUEST_AUTH", self()))
-            val auth = receive [hn x => x]
         in case seqs of 
         (x1::x2::x3::xs) => 
-            let val _ = write "\nstart\n" auth
-                val seqs_of_curr = seqs_of_seq (x2()) lengths
+            let val seqs_of_curr = seqs_of_seq (x2()) lengths
                 val args_and_leftovers = mapi (fn (i, x) =>
                                         let val _ = send (pid, ("UPDATE_LS", (nth seqs_of_curr (i+1))))
                                             val arg = x tco size
@@ -285,7 +282,7 @@ All of these functions are spawned and then requests or updates may be send to t
             in
                 case (apply_args prop test_args tco) orelse (precond_is_met = false) of 
                 true => shrink_aux (x1::x3()) gens lengths prop pre size counter tco
-                | false => integrated_shrink ret_seqs gens prop pre size (counter+1) tco
+                | false => internal_shrink ret_seqs gens prop pre size (counter+1) tco
             end  
         | (x::xs) => 
             let val seqs_of_curr = seqs_of_seq (x()) lengths
@@ -307,19 +304,16 @@ All of these functions are spawned and then requests or updates may be send to t
             end 
         end
 
-    and integrated_shrink sequences gens prop pre size counter tco = 
-        let val _ = send (tco, ("REQUEST_AUTH", self()))
-            val auth = receive [hn x => x] (* TODO: Delete this *)
-            val (seqs_comb, seq_lengths) = foldl (fn (x, (seq, lengths)) => ((append seq x), (append lengths [(length x)]))) ([], []) sequences
+    and internal_shrink sequences gens prop pre size counter tco = 
+        let val (seqs_comb, seq_lengths) = foldl (fn (x, (seq, lengths)) => ((append seq x), (append lengths [(length x)]))) ([], []) sequences
         in
             if foldl (fn (x,y) => (x = 0) andalso y) true seqs_comb then 
-                shrink_aux [seqs_comb] gens seq_lengths prop pre size counter tco
+                shrink_aux [fn () => seqs_comb] gens seq_lengths prop pre size counter tco
             else  
                 let val decreased_seqs = dec_all seqs_comb
                     val dec_seqs_w_root = append [fn() => seqs_comb] decreased_seqs
                     val res = shrink_aux dec_seqs_w_root gens seq_lengths prop pre size (counter) tco
                 in 
-                write "\ntesting 2\n" auth;
                 res end
         end
     
@@ -352,7 +346,7 @@ All of these functions are spawned and then requests or updates may be send to t
             val _ = send (tco, ("UPDATE_RNG", self(), rng_replayer))
             val _ = receive [hn x => ()]
         in 
-        integrated_shrink (res.sequences) generators prop pre res.size (res.count) tco end 
+        internal_shrink (res.sequences) generators prop pre res.size (res.count) tco end 
 (*
 --------------------------------
 GENERATORS

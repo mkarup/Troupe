@@ -170,7 +170,6 @@ Testing the game host using TroupeCheck
                         else
                             ("Invalid coordinates for ship of type: " ^ ship_type)
                     end 
-                val _ = print coordinate
                 val ((x,y), direction, ship) = coordinate
             in case direction of
                 "v" => place_vertical (x,y) ship board_or_error
@@ -325,8 +324,10 @@ Testing the game host using TroupeCheck
         end
     
     fun attack_gen tco size = 
-        print "entering attack gen";
-        (integer(1, 10) tco size, integer(1,10) tco size)
+        let val res = (integer(1, 10) tco size, integer(1,10) tco size)
+        in 
+            res
+        end
 
     fun test_do_attack_no_leak (board, ships) attack = 
         let val interim_res1 = ((levelOf board) = (levelOf ships)) 
@@ -387,5 +388,5 @@ Testing the game host using TroupeCheck
         end
     val game = spawn(fn () => game p1 p2 1) *)
 
-in print_board (board_ships_gen tco 10).0 (* troupecheck[prop_bad_do_att] authority *)
+in troupecheck[prop_bad_do_att] authority
 end
