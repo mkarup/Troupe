@@ -388,5 +388,5 @@ Testing the game host using TroupeCheck
         end
     val game = spawn(fn () => game p1 p2 1) *)
 
-in troupecheck[prop_bad_do_att] authority
+in troupecheck[prop_do_att_test, prop_bad_do_att] authority
 end
