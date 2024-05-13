@@ -170,6 +170,7 @@ Testing the game host using TroupeCheck
                         else
                             ("Invalid coordinates for ship of type: " ^ ship_type)
                     end 
+                val _ = print coordinate
                 val ((x,y), direction, ship) = coordinate
             in case direction of
                 "v" => place_vertical (x,y) ship board_or_error
@@ -197,62 +198,134 @@ Testing the game host using TroupeCheck
             (board, ships)
         end
     
+    fun remove_elem elem [] = []
+    | remove_elem elem (x::xs) =
+        if elem = x then 
+            xs
+        else
+            x :: (remove_elem elem xs)  
 
-    fun ship_gen taken_coords ship_type tco size = 
+
+    fun remove_available_coords available_coords coords (x,y) dir length = 
+        let val to_remove = 
+            case dir of 
+            "h" => 
+                let val to_remove_interim = for_i (fn (ls, count) => (append ls [(count, y)], (count-1))) (coords, (x-1)) (length-1)
+                    in foldl (fn (c, acc) => 
+                                            let val interim_x = c.0
+                                                val interim_y = c.1
+                                                val new_ls = 
+                                                    for_i (fn (ls, count) => 
+                                                            (append ls [(interim_x, (interim_y-count))], (count+1))) ([], 1) (length-1)
+                                                in append acc new_ls end) to_remove_interim coords
+                    end
+                    
+            | "v" => 
+                let val to_remove_interim = for_i (fn (ls, count) => (append ls [(x, count)], (count-1))) (coords, (y-1)) (length-1)
+                    in foldl (fn (c, acc) => 
+                                            let val interim_x = c.0
+                                                val interim_y = c.1
+                                                val new_ls = 
+                                                    for_i (fn (ls, count) => 
+                                                            (append ls [((interim_x-count), interim_y)], (count+1))) ([], 1) (length-1)
+                                                in append acc new_ls end) to_remove_interim coords
+                    end
+        val new_available = foldl (fn (x, y) => remove_elem x y) available_coords to_remove
+        in 
+            new_available 
+        end
+
+    fun ship_gen available_coords ship_type tco size = 
         let val dir = one_of ["h", "v"] tco size 
-            val ship_size = bound_from_ship ship_type
-            fun ship_gen_aux direction = 
-                case direction of 
-                "h" => 
-                let val x = integer(1, (ship_size+1)) tco size
-                    val y = integer(1, 10) tco size 
-                    in if length taken_coords = 0 then 
-                        (x,y) 
-                    else 
-                        let val ship_coords = ship_coords_from_info ((x,y), dir, ship_type)
-                            val ship_coords_not_used = foldl (fn (x,y) => if elem x taken_coords then false else (true andalso y)) true ship_coords
-                        in 
-                            if ship_coords_not_used then 
-                                (x,y) 
-                            else 
-                                ship_gen_aux direction 
-                        end
+            val (coord, coords) = case dir of 
+                "h" =>
+                    let val avail = 
+                        case ship_type of 
+                        "C" => 
+                            available_coords.c_h
+                        | "B" => 
+                            available_coords.b_h
+                        | "S" => 
+                            available_coords.s_h
+                        | "D" => 
+                            available_coords.d_h
+                        val coord = one_of avail tco size 
+                        val coords = ship_coords_from_info (coord, "h", ship_type)
+                    in (coord, coords)
+                    end
+                | "v" => 
+                    let val avail = 
+                        case ship_type of 
+                        "C" => 
+                            available_coords.c_v
+                        | "B" => 
+                            available_coords.b_v
+                        | "S" => 
+                            available_coords.s_v
+                        | "D" => 
+                            available_coords.d_v
+                        val coord = one_of avail tco size 
+                        val coords = ship_coords_from_info (coord, "v", ship_type)
+                    in (coord, coords)
                     end
 
-                | "v" => 
-                    let val x = integer(1, 10) tco size
-                        val y = integer(1, (ship_size+1)) tco size 
-                    in if length taken_coords = 0 then 
-                        (x,y) 
-                    else 
-                        let val ship_coords = ship_coords_from_info ((x,y), dir, ship_type)
-                            val ship_coords_not_used = foldl (fn (x,y) => if elem x taken_coords then false else (true andalso y)) true ship_coords
-                        in 
-                            if ship_coords_not_used then 
-                                (x,y) 
-                            else 
-                                ship_gen_aux direction 
-                        end
-                    end 
-            in (ship_gen_aux dir, dir, ship_type)
-            end
+            val newC_h = remove_available_coords available_coords.c_h coords coord dir 5
+            val newC_v = remove_available_coords available_coords.c_v coords coord dir 5
+            val newB_h = remove_available_coords available_coords.c_h coords coord dir 4
+            val newB_v = remove_available_coords available_coords.c_v coords coord dir 4
+            val newS_h = remove_available_coords available_coords.c_h coords coord dir 3
+            val newS_v = remove_available_coords available_coords.c_v coords coord dir 3
+            val newD_h = remove_available_coords available_coords.c_h coords coord dir 2
+            val newD_v = remove_available_coords available_coords.c_v coords coord dir 2
+        in ((coord, dir, ship_type), {c_h = newC_h, c_v = newC_v, b_h = newB_h, b_v = newB_v, d_h = newS_h, s_h = newS_h, s_v = newS_v, d_h = newD_h, d_v = newD_v})
+        end
         
+    fun make_init_avail_rec () = 
+        let fun remove_elem_xs elem [] = []
+            | remove_elem_xs elem (x::xs) =
+                if (elem = (x.0)) then 
+                    remove_elem_xs elem xs
+                else
+                    x :: (remove_elem_xs elem xs)  
+            
+            fun remove_elem_ys elem [] = []
+            | remove_elem_ys elem (x::xs) =
+                if (elem = (x.1)) then 
+                    remove_elem_ys elem xs
+                else
+                    x :: (remove_elem_ys elem xs) 
+            
+            val init = for_i (fn (acc, x_count) => 
+                                let val list = for_i (fn (acc, y_count) => (append acc [(x_count, y_count)], (y_count+1))) ([], 1) 10 
+                                in (append acc list, (x_count+1))
+                                end) ([], 1) 10
+            val c_h = foldl (fn(x,y) => remove_elem_xs x y) init [7, 8, 9, 10]
+            val c_v = foldl (fn(x,y) => remove_elem_ys x y) init [7, 8, 9, 10]
+            val b_h = foldl (fn(x,y) => remove_elem_xs x y) init [8, 9, 10]
+            val b_v = foldl (fn(x,y) => remove_elem_ys x y) init [8, 9, 10]
+            val s_h = foldl (fn(x,y) => remove_elem_xs x y) init [9, 10]
+            val s_v = foldl (fn(x,y) => remove_elem_ys x y) init [9, 10]
+            val d_h = foldl (fn(x,y) => remove_elem_xs x y) init [10]
+            val d_v = foldl (fn(x,y) => remove_elem_ys x y) init [10]
+        in {c_h, c_v, b_h, b_v, s_h, s_v, d_h, d_v}
+        end
+
+
     fun board_ships_gen tco size = 
-        let val carrier = ship_gen [] "C" tco size  
-            val fst_taken = ship_coords_from_info carrier 
-            val battleshp = ship_gen fst_taken "B" tco size
-            val snd_taken = append fst_taken (ship_coords_from_info battleshp)
-            val sub1 = ship_gen snd_taken "S" tco size
-            val thrd_taken = append snd_taken (ship_coords_from_info sub1)
-            val sub2 = ship_gen thrd_taken "S" tco size
-            val frth_taken = append thrd_taken (ship_coords_from_info sub2)
-            val destroyer = ship_gen frth_taken "D" tco size
+        let val init_avail = make_init_avail_rec ()
+            val (carrier, avail1) = ship_gen init_avail "C" tco size  
+            val (battleshp, avail2) = ship_gen avail1 "B" tco size
+            val (sub1, avail3) = ship_gen avail2 "S" tco size
+            val (sub2, avail4) = ship_gen avail3 "S" tco size
+            val (destroyer, _) = ship_gen avail4 "D" tco size
             val ship_ls = [carrier, battleshp, sub1, sub2, destroyer]
             val (board, ships) = make_board ship_ls
-        in (board, ships)
+        in
+        (board, ships)
         end
     
     fun attack_gen tco size = 
+        print "entering attack gen";
         (integer(1, 10) tco size, integer(1,10) tco size)
 
     fun test_do_attack_no_leak (board, ships) attack = 
@@ -260,9 +333,15 @@ Testing the game host using TroupeCheck
             val interim_res2 = ((levelOf board) = (levelOf (do_attack board ships attack)))
         in (interim_res1 andalso interim_res2)
         end 
+    
+    fun test_bad_do_attack (board, ships) attack = 
+        (length (do_attack board ships attack).1) = 11
 
     fun prop_do_att_test() = 
         for_all ([(labeled_value [`{alice}`, `{bob}`] board_ships_gen), attack_gen], test_do_attack_no_leak)
+    
+    fun prop_bad_do_att() = 
+        for_all ([(labeled_value [`{alice}`, `{bob}`] board_ships_gen), attack_gen], test_bad_do_attack)
     
     
     fun init_tc auth rng =  
@@ -308,5 +387,5 @@ Testing the game host using TroupeCheck
         end
     val game = spawn(fn () => game p1 p2 1) *)
 
-in troupecheck[prop_do_att_test] authority
+in print_board (board_ships_gen tco 10).0 (* troupecheck[prop_bad_do_att] authority *)
 end

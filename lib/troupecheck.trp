@@ -264,9 +264,12 @@ All of these functions are spawned and then requests or updates may be send to t
     fun shrink_aux seqs gens lengths prop pre size counter tco = 
         let val _ = send(tco, ("REQUEST_RNG", self())) 
             val pid = receive [hn x => x]
+            val _ = send (tco, ("REQUEST_AUTH", self()))
+            val auth = receive [hn x => x]
         in case seqs of 
         (x1::x2::x3::xs) => 
-            let val seqs_of_curr = seqs_of_seq (x2()) lengths
+            let val _ = write "\nstart\n" auth
+                val seqs_of_curr = seqs_of_seq (x2()) lengths
                 val args_and_leftovers = mapi (fn (i, x) =>
                                         let val _ = send (pid, ("UPDATE_LS", (nth seqs_of_curr (i+1))))
                                             val arg = x tco size
@@ -274,7 +277,6 @@ All of these functions are spawned and then requests or updates may be send to t
                                             val left_overs = receive [hn x => x] 
                                         in {arg = arg, left_overs = left_overs}
                                         end) gens
-
                 val (test_args, left_over_seqs) = foldl (fn (x, (raws, left_overs)) => (append raws [x.arg], append left_overs [x.left_overs])) ([],[]) args_and_leftovers
                 val ret_seqs = mapi (fn (i,x) => 
                                         if (length x) = 0 then (nth seqs_of_curr (i+1)) 
@@ -306,7 +308,9 @@ All of these functions are spawned and then requests or updates may be send to t
         end
 
     and integrated_shrink sequences gens prop pre size counter tco = 
-        let val (seqs_comb, seq_lengths) = foldl (fn (x, (seq, lengths)) => ((append seq x), (append lengths [(length x)]))) ([], []) sequences
+        let val _ = send (tco, ("REQUEST_AUTH", self()))
+            val auth = receive [hn x => x] (* TODO: Delete this *)
+            val (seqs_comb, seq_lengths) = foldl (fn (x, (seq, lengths)) => ((append seq x), (append lengths [(length x)]))) ([], []) sequences
         in
             if foldl (fn (x,y) => (x = 0) andalso y) true seqs_comb then 
                 shrink_aux [seqs_comb] gens seq_lengths prop pre size counter tco
@@ -315,6 +319,7 @@ All of these functions are spawned and then requests or updates may be send to t
                     val dec_seqs_w_root = append [fn() => seqs_comb] decreased_seqs
                     val res = shrink_aux dec_seqs_w_root gens seq_lengths prop pre size (counter) tco
                 in 
+                write "\ntesting 2\n" auth;
                 res end
         end
     
