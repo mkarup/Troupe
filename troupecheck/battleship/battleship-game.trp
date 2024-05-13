@@ -1,13 +1,7 @@
 import lists 
 import timeout
 import troupecheck
-let fun write x =
-    fwrite ((getStdout authority), x)
-
-    fun print_board b = 
-        foldl (fn (x,_) => foldl (fn (y,_) => write (" "^y^" ")) () x; write "\n")() b
-
-    fun make_row (f, i) = 
+let fun make_row (f, i) = 
         case i of 
         0 => []
         | _ => append (make_row (f, i-1)) [f i]
@@ -121,24 +115,12 @@ Testing the game host using TroupeCheck
     fun for_i body acc 0 = acc.0 
     | for_i body acc to = for_i body (body acc) (to-1)
 
-    fun write x =
-    fwrite ((getStdout authority), x)
-
     fun bound_from_ship ship = 
         case ship of 
         "C" => 5
         | "B" => 4
         | "S" => 3 
         | "D" => 2
-
-    fun print_board b = 
-        write "\n";
-        foldl (fn (x,_) => foldl (fn (y,_) => write (" "^y^" ")) () x; write "\n")() b
-    
-    fun make_row (f, i) = 
-        case i of 
-        0 => []
-        | _ => append (make_row (f, i-1)) [f i]
 
     fun update_board_creation board_or_error coordinate = 
         case getType board_or_error of 
@@ -343,50 +325,5 @@ Testing the game host using TroupeCheck
     
     fun prop_bad_do_att() = 
         for_all ([(labeled_value [`{alice}`, `{bob}`] board_ships_gen), attack_gen], test_bad_do_attack)
-    
-    
-    fun init_tc auth rng =  
-        receive [hn ("REQUEST_RNG", senderid) => 
-                    let val _ = send (senderid, rng) 
-                    in init_tc auth rng end,
-
-                hn ("REQUEST_AUTH", senderid) => 
-                    let val _ = send (senderid, auth) 
-                    in init_tc auth rng end,
-
-                hn ("UPDATE_RNG", senderid, new_rng) => 
-                    let val _ = send(senderid, "done") in
-                    init_tc auth new_rng end]
-    fun rec_rng ls =
-        receive [hn ("REQUEST_RND", senderid) =>
-                    let val rnd = random()
-                        val _ = send (senderid, rnd) 
-                        in rec_rng (append ls [rnd])
-                        end, 
-                hn ("REQUEST_SEQ", senderid) => 
-                    let val _ = send (senderid, ls)
-                    in rec_rng []
-                    end]
-        
-    val rng_recorder = spawn (fn() => rec_rng [])
-    val tco = spawn (fn() => init_tc authority rng_recorder)
-    val (board, ships) = board_ships_gen tco 10
-    (*fun playerfun() = 
-        receive [hn ("YOURTURN", senderid) => let val _ = print "YOURTURN" 
-                                         val _ = send(senderid, (("ATTACK", (1,2)), self()))
-                                         in playerfun() end, 
-                hn x => let val _ = print x in playerfun() end]
-    val p1_id = spawn (fn() => playerfun())
-    val p2_id = spawn (fn() => playerfun())
-    val p1 = 
-        let val (board, ships) = board_ships_gen tco 10
-        in {board = (board raisedTo `{p1}`), id = p1_id, ships = (ships raisedTo `{p1}`)}
-        end
-    val p2 = 
-        let val (board, ships) = board_ships_gen tco 10
-        in {board = (board raisedTo `{p2}`), id = p2_id, ships = (ships raisedTo `{p2}`)}
-        end
-    val game = spawn(fn () => game p1 p2 1) *)
-
 in troupecheck[prop_do_att_test, prop_bad_do_att] authority
 end
