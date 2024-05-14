@@ -162,7 +162,7 @@ see 'FUNCTIONS FOR TESTING'.
     fun prop_abs_value() = for_all  ([(one_of_two (integer(), float()))], abs_value_is_always_pos)
     fun prop_floor() = for_all  ([float()], my_floor_test)
     fun prop_my_length() = for_all ([list(integer())], my_length_test)
-    fun prop_make_list_test() = for_all ([generator(), pos_integer()], make_list_test)
+    fun prop_make_list_test() = for_all ([generator(), integer(0, 10)], make_list_test)
     fun prop_my_ceil1() = for_all ([float()], my_ceil1_test)
     fun prop_my_ceil2() = for_all ([float()], my_ceil2_test)
     fun prop_both_ceil() = for_all ([float()], both_ceil_test)
