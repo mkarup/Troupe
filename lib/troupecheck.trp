@@ -224,15 +224,6 @@ All of these functions are spawned and then requests or updates may be send to t
 
 -------------------------------- 
 *)  
-    fun produce_rng rng = 
-        receive [hn ("REQUEST_RNG", senderid) => 
-                    let val _ = send (senderid, rng) 
-                    in produce_rng rng end,
-                
-                hn ("UPDATE_RNG", senderid, new_rng) => 
-                    let val _ = send(senderid, "done") in
-                    produce_rng new_rng end]
-
     fun rec_rng ls =
         receive [hn ("REQUEST_RND", senderid) =>
                     let val rnd = random()
