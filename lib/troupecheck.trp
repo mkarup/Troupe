@@ -548,9 +548,7 @@ Handles running the tests (core_forall), shrinking, preparing the recorder RNG a
             fun troupecheck_aux [] i = exit (auth, 0)
             | troupecheck_aux (x::xs) i =
                 let val _ = write ("\nRunning test " ^ (toString i) ^ " of " ^ n ^ ":\n") auth
-                    val self_id = self()
-                    val _ = spawn (fn () => let val _ = (x() auth) in send(self_id, "done") end )
-                    val _ = receive [hn x => ()] 
+                    val _ = x() auth
                 in troupecheck_aux xs (i+1) end
         in troupecheck_aux props 1 
         end
