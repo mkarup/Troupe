@@ -217,8 +217,8 @@ Different utility functions that are used across the library.
                 aux xs (append acc [x]) (i-1) in 
         aux list [] idx end 
     
-    fun for_i body 0 = body() 
-    | for_i body to = body(); for_i body (to-1)
+    fun for_i f y 0 = y
+      | for_i f y i = for_i f (f (i,y)) (i-1)
 (* 
 --------------------------------
 SHRINKING
@@ -261,6 +261,40 @@ All of these functions are spawned and then requests or updates may be send to t
                     end, 
                 hn ("UPDATE_LS", new_ls) => 
                     rep_rng new_ls]
+    
+    fun shrink_sized_sequence seqs gens prop pre size left_over_len idx_of_sized tco = 
+        let val _ = send(tco, ("REQUEST_RNG", self())) 
+            val pid = receive [hn x => x]
+            val _ = send(tco, ("REQUEST_AUTH", self())) 
+            val auth = receive [hn x => x]
+            (* val _ = write ("\nseq length: " ^ (toString (length (nth seqs (idx_of_sized+1)))) ^ "\n") auth
+            val _ = write ("\nleft over length: " ^ (toString left_over_len) ^ "\n") auth *)
+            val cap = ceil (((length (nth seqs (idx_of_sized+1)))-2)/left_over_len )(* number of elements in the generated list *)
+            val size_ls = for_i (fn (x,y) => append y [x]) [] (left_over_len-1)
+            fun aux i = 
+                let val to_remove = foldl (fn (x,y) => append y [(i*left_over_len)-x])[i*left_over_len] size_ls
+                        val new_seq = foldl (fn (x,y) => remove_nth x y 0) (nth seqs (idx_of_sized+1)) to_remove
+                        val new_seqs = mapi (fn (i, x) => if i = idx_of_sized then new_seq else x) seqs
+                        val new_args = mapi (fn (i, x) =>
+                                        let val _ = send (pid, ("UPDATE_LS", (nth new_seqs (i+1))))
+                                            val arg = x tco size
+                                        in arg
+                                        end) gens
+                in case i = (cap) of 
+                true => 
+                    (new_seqs, new_args)
+                | false => 
+                    let val precond_is_met = if (pre <> ()) then (apply_args pre new_args tco) else true 
+                    in case (apply_args prop new_args tco) orelse (precond_is_met = false) of 
+                        true => aux (i+1)
+                        | false => (new_seqs, new_args) (* shrink_sized_sequence new_seqs gens prop pre size idx_of_sized tco *)
+                    end 
+                end 
+            (* val _ = write ("\ncap: " ^ (toString cap) ^ "\n") auth *)
+        in aux 1
+        end
+
+
 
     fun internal_shrink_aux seqs gens lengths prop pre size counter tco = 
         let val _ = send(tco, ("REQUEST_RNG", self())) 
@@ -278,18 +312,22 @@ All of these functions are spawned and then requests or updates may be send to t
                                         in {arg = arg, left_overs = left_overs}
                                         end) gens
                 val (test_args, left_over_seqs) = foldl (fn (x, (raws, left_overs)) => (append raws [x.arg], append left_overs [x.left_overs])) ([],[]) args_and_leftovers
-                val ret_seqs = mapi (fn (i,x) => 
+                (* val ret_seqs = mapi (fn (i,x) => 
                                         if (length x) = 0 then (nth seqs_of_curr (i+1)) 
-                                        else cutoff_at (nth seqs_of_curr (i+1)) ((nth lengths (i+1))-(length x))) left_over_seqs
-                val precond_is_met = if (pre <> ()) then (apply_args pre test_args tco) else true 
-                val _ = write ("\norg seq= " ^ (toString seqs_of_curr) ^ "\n") auth
-                val _ = write ("\nseq= " ^ (toString ret_seqs) ^ "\n") auth
-                val _ = write ("\nargs= " ^ (toString test_args) ^ "\n") auth
-            in
-                case (apply_args prop test_args tco) orelse (precond_is_met = false) of 
-                true => internal_shrink_aux (x1::x3()) gens lengths prop pre size counter tco
-                | false => internal_shrink ret_seqs gens prop pre size (counter+1) tco
-            end  
+                                        else cutoff_at (nth seqs_of_curr (i+1)) ((nth lengths (i+1))-(length x))) left_over_seqs *)
+                val (is_sized_sequence, idx_of_sized, left_over_size, _) = foldl (fn (x,(bool, idx, len, count)) => if (length x > 0) 
+                                                                            then (true, count, (length x), (count+1))
+                                                                            else (bool, idx, len, (count+1))) (false, -1, 0, 0) left_over_seqs
+                
+                val (ret_seqs, args) = if is_sized_sequence 
+                                then shrink_sized_sequence seqs_of_curr gens prop pre size left_over_size idx_of_sized tco
+                                else (seqs_of_curr, test_args)
+                val precond_is_met = if (pre <> ()) then (apply_args pre args tco) else true 
+            in    
+                case (apply_args prop args tco) orelse (precond_is_met = false) of 
+                    true => internal_shrink_aux (x1::x3()) gens lengths prop pre size counter tco
+                    | false => internal_shrink ret_seqs gens prop pre size (counter+1) tco 
+            end 
         | (x::xs) => 
             let val seqs_of_curr = seqs_of_seq (x()) lengths
                 val test_args = mapi (fn (i, y) => 
@@ -351,6 +389,8 @@ All of these functions are spawned and then requests or updates may be send to t
             val rng_replayer = spawn (fn() => rep_rng [])
             val _ = send (tco, ("UPDATE_RNG", self(), rng_replayer))
             val _ = receive [hn x => ()]
+            val _ = send (tco, ("REQUEST_AUTH", self()))
+            val auth = receive [hn x => x]
         in 
         internal_shrink (res.sequences) generators prop pre res.size (res.count) tco end 
 (*
@@ -464,16 +504,12 @@ However, it can be done if the users wishes to and understands what is going on.
 
     (* TODO: needs to be completed... *)
     fun generator_gen tco size = 
-        let val rnd = int_gen (1,7) size
-            val inf = 1/0
-            val res = if rnd = 1 then ((fn i => int_gen (inf, inf) tco i)) else 
-                      if rnd = 2 then ((fn i => bool_gen tco i)) else 
-                      if rnd = 3 then ((fn i => float_gen (inf, inf) tco i)) else
-                      if rnd = 4 then ((fn i => string_gen tco i)) else
-                      if rnd = 5 then ((fn i => char_gen tco i)) else
-                      if rnd = 6 then ((fn i => tuple_gen (make_list ((fn () => int_gen(inf, inf) tco i), i)) tco i)) else
-                     ((fn i => list_gen (int_gen(inf, inf)) tco i)) in
-        res end
+        let val inf = 1/0
+            val gens_ls = [(float_gen (inf, inf)), (int_gen(inf, inf)), bool_gen, (list_gen(generator_gen tco size)), char_gen, string_gen,
+                           (tuple_gen (list_gen(generator_gen tco size))), (rec_gen (list_gen(string_gen)) ((generator_gen tco size))), 
+                           (labeled_value_gen (list_gen(string_gen)) (generator_gen tco size))]
+            val gen = one_of gens_ls 
+        in gen end
         
 (* 
 --------------------------------

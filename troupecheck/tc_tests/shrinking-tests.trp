@@ -30,7 +30,7 @@ let fun filter_less ([], _) = []
     
     fun filter_less2 ([], _) = []
     | filter_less2 ((x::xs), p) = 
-        if ((x < p) andalso (x<>0)) orelse (p = 0) then append [x] (filter_less2 (xs, p)) else (filter_less2 (xs, p))
+        if ((x <= p) andalso (x<>0)) orelse (p = 0) then append [x] (filter_less2 (xs, p)) else (filter_less2 (xs, p))
 
     fun filter_greater2 ([], _) = []
     | filter_greater2 ((x::xs), p) = 
@@ -42,9 +42,27 @@ let fun filter_less ([], _) = []
             val greater = my_quicksort2(filter_greater2(xs, x)) in 
         append (append smaller [x]) (greater) end 
     
+    fun filter_less3 ([], _) = []
+    | filter_less3((x::xs), p) = 
+        if (x < p)andalso (x<>15) then append [x] (filter_less3 (xs, p)) else (filter_less3 (xs, p))
+
+    fun filter_greater3 ([], _) = []
+    | filter_greater3 ((x::xs), p) = 
+        if (x >= p) andalso (x<>15) then append [x] (filter_greater3 (xs, p)) else (filter_greater3 (xs, p))
+
+    fun my_quicksort3 [] = []
+    | my_quicksort3 (x::xs) =
+        let val smaller = my_quicksort3(filter_less3(xs, x))
+            val greater = my_quicksort3(filter_greater3(xs, x)) in 
+        append (append smaller [x]) (greater) end 
+
+
+
+
+
     fun bad_insert xs x = 
-    if length xs < 10 then append [x] xs else
-    xs
+        if length xs < 10 then append [x] xs else
+        xs
 
     fun bad_half n = 
         if n > 10 then n else n/2
@@ -91,6 +109,9 @@ BOOLEAN STATEMENTS FOR TESTING.
     fun mysort2_is_ordered xs = 
         ordered (my_quicksort2 xs)
 
+    fun mysort3_keep_length xs = 
+        length xs = length (my_quicksort3(xs))
+
 (* 
 --------------------------------
 PROPERTIES TO RUN WITH TROUPECHECK.
@@ -104,7 +125,8 @@ PROPERTIES TO RUN WITH TROUPECHECK.
     fun prop_shrink_test() = for_all ([integer(), integer(), integer(), integer()], shrink_test)
     fun prop_keep_length() = for_all ([list(integer())], my_sort_keep_length)
     fun prop_mysort2_ordered() = for_all ([list(integer())], mysort2_is_ordered)
+    fun prop_mysort3_keep_length() = for_all ([list(integer())], mysort3_keep_length)
     val prop_list = [prop_append_always_longer, prop_bad_insert, prop_bad_half, prop_record_shrink, 
-                    prop_shrink_test, prop_keep_length, prop_mysort2_ordered]
+                    prop_shrink_test, prop_keep_length, prop_mysort2_ordered, prop_mysort3_keep_length]
 in troupecheck prop_list authority
 end 
