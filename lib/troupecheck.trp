@@ -267,9 +267,7 @@ All of these functions are spawned and then requests or updates may be send to t
             val pid = receive [hn x => x]
             val _ = send(tco, ("REQUEST_AUTH", self())) 
             val auth = receive [hn x => x]
-            (* val _ = write ("\nseq length: " ^ (toString (length (nth seqs (idx_of_sized+1)))) ^ "\n") auth
-            val _ = write ("\nleft over length: " ^ (toString left_over_len) ^ "\n") auth *)
-            val cap = ceil (((length (nth seqs (idx_of_sized+1)))-2)/left_over_len )(* number of elements in the generated list *)
+            val cap = ceil (((length (nth seqs (idx_of_sized+1)))-2)/left_over_len )(* number of to remove parts of the sequence *)
             val size_ls = for_i (fn (x,y) => append y [x]) [] (left_over_len-1)
             fun aux i = 
                 let val to_remove = foldl (fn (x,y) => append y [(i*left_over_len)-x])[i*left_over_len] size_ls
@@ -287,10 +285,9 @@ All of these functions are spawned and then requests or updates may be send to t
                     let val precond_is_met = if (pre <> ()) then (apply_args pre new_args tco) else true 
                     in case (apply_args prop new_args tco) orelse (precond_is_met = false) of 
                         true => aux (i+1)
-                        | false => (new_seqs, new_args) (* shrink_sized_sequence new_seqs gens prop pre size idx_of_sized tco *)
+                        | false => (new_seqs, new_args) 
                     end 
                 end 
-            (* val _ = write ("\ncap: " ^ (toString cap) ^ "\n") auth *)
         in aux 1
         end
 
