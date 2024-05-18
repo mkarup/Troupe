@@ -176,7 +176,7 @@ Different utility functions that are used across the library.
                 | dec_nth_aux (x::xs) acc i =
                     case i = idx of 
                     true =>
-                        let val dec_val = if x <= 1/10000 then 0 else x/(5/4) in
+                        let val dec_val = if x <= 1/10000 then 0 else x/(3/2) in
                         append (append acc [dec_val]) xs end
                     | false => dec_nth_aux xs (append acc [x]) (i+1)
         in  
