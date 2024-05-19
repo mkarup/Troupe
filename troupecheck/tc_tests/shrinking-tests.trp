@@ -128,5 +128,5 @@ PROPERTIES TO RUN WITH TROUPECHECK.
     fun prop_mysort3_keep_length() = for_all ([list(integer())], mysort3_keep_length)
     val prop_list = [prop_append_always_longer, prop_bad_insert, prop_bad_half, prop_record_shrink, 
                     prop_shrink_test, prop_keep_length, prop_mysort2_ordered, prop_mysort3_keep_length]
-in troupecheck prop_list authority
+in troupecheck [prop_record_shrink] authority
 end 

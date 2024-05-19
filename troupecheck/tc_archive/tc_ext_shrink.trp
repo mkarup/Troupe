@@ -124,7 +124,7 @@ SHRINKING - r
         |"done" => 
             rec_checked
         | _ => 
-            let val new_raw_val = if (abs_value curr_val)-1 <= 0 then 0 else curr_val/2 
+            let val new_raw_val = if (abs_value curr_val)-1 <= 0 then 0 else curr_val-1 
             in 
             {state = "cont", curr = new_raw_val, prev = rec_checked.curr} 
             end 
@@ -458,7 +458,7 @@ CORE FUNCTIONALITY - a
                     else core_forall (generator, prop, i, size+1, pre, cap))
             end
 
-    fun tc_n generators p noOfTests = 
+    fun run_tests generators p noOfTests = 
         let val (prop, pre) = 
                 case p of    
                     (x,y) => (x,y)
@@ -477,10 +477,18 @@ CORE FUNCTIONALITY - a
                     end
         end
     
-    fun tc generator p = tc_n generator p 100
+    fun for_all (generators, p) = run_tests generators p 100 
+    | for_all (generators, p, noOfTests) = run_tests generators p noOfTests 
 
-    fun troupecheck generator p noOfTests = spawn (fn() => tc_n generator p noOfTests)
-    | troupecheck generator p = spawn (fn() => tc generator p)
+    fun troupecheck props = 
+        let val n = toString (length props)
+            fun troupecheck_aux [] i = exit (authority, 0)
+            | troupecheck_aux (x::xs) i =
+                let val _ = write ("\nRunning test " ^ (toString i) ^ " of " ^ n ^ ":\n")
+                    val _ = x()
+                in troupecheck_aux xs (i+1) end
+        in troupecheck_aux props 1 
+        end
 
 (* 
 --------------------------------
@@ -684,10 +692,10 @@ TC^2 - z
 -------------------------------- 
 *)
     fun tc_sort_length_always_fails () =    
-        tc [list(integer())] my_sort_keep_length = false
+        for_all [list(integer())] my_sort_keep_length = false
     
     fun tc_sort_ordered_always_true () =    
-        tc [list(integer())] my_sort_is_ordered = true
+        for_all [list(integer())] my_sort_is_ordered = true
 
 (*
 --------------------------------
@@ -940,9 +948,12 @@ CUSTOM TYPE PROGRAM
     
     fun test_prog_opt prog = 
         (interpret prog) = (interpret (optimize_prog prog))
-    val exp = exp_gen [] 0 3
-    val stmt = stmt_gen [] 3
-    val prog = program_gen 2
+    fun test_prog_shrink prog = 
+        (interpret prog) < 100
+    fun record_shrink_test r = 
+        r.theInteger < 50
+    fun prop_program_shrink() = for_all ([program_gen], test_prog_shrink)
+    fun prop_record_shrink() = for_all ([(record ["theInteger", "theString"] [integer(), string()])], record_shrink_test)
 in
 
 (*
@@ -951,7 +962,7 @@ ALL TESTS - x
 -------------------------------- 
 *)
 
-tc [list(integer())] my_sort_keep_length
+troupecheck[prop_record_shrink]
 (* tc [program_gen] test_prog_opt  *)
 
 (* shrinking tests - x *)
