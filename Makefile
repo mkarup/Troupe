@@ -21,10 +21,9 @@ libs:
 	$(COMPILER) ./lib/declassifyutil.trp -l 
 	$(COMPILER) ./lib/stdio.trp -l 
 	$(COMPILER) ./lib/timeout.trp -l
-	$(COMPILER) ./lib/raft.trp -l
-	$(COMPILER) ./lib/raft_debug.trp -l
 	$(COMPILER) ./lib/bst.trp -l	
 	$(COMPILER) ./lib/localregistry.trp -l	
+	$(COMPILER) ./lib/raft_troupe.trp -l
 
 test:
 	mkdir -p out
