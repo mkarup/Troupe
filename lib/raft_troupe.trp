@@ -76,7 +76,7 @@ import lists
 *)
 
 datatype Atoms = 
-                WAIT | SUS | DONE
+                WAIT | SUS |  DONE
                 | SEND_HEARTBEAT 
                 | RAFT_UPDATE 
                 | NOT_LEADER
@@ -119,12 +119,6 @@ let
     fun max a b = if a < b then b else a 
 
     fun min a b = if a > b then b else a
-
-    (* Prints if verbose is true. *)
-    fun verbose_print x verbose = 
-        (* Disabled for library *)
-        (* if verbose then print x else *) 
-        ()
 
     (* #IMPORT libs/quickselect.trp *)
     fun is_even i = i mod 2 = 0
@@ -578,9 +572,7 @@ fun leader_node node =
                 val leader_info = update_match_index node.leader_info p_id (get_log_index log)
                 val leader_info = update_next_index leader_info p_id ((get_log_index log) + 1)
                 val node = {node with log = log, leader_info = leader_info}
-            in 
-                verbose_print (node.id^": Appending new message to log") node.verbose;
-                node
+            in node
         end
 
         (* Applies all committed log entries that have not already been applied *)
@@ -615,9 +607,7 @@ fun leader_node node =
                     ]
                     in pause () end,
 
-                hn (SEND_HEARTBEAT, x) when nonce = x =>
-                    verbose_print (node.id^": Sending heartbeat") node.verbose;
-                    leader_node node,
+                hn (SEND_HEARTBEAT, x) when nonce = x => leader_node node,
 
                 hn (SEND_HEARTBEAT, x) =>
                     loop node,
@@ -670,7 +660,6 @@ fun leader_node node =
                 (* If another node has been elected as a candidate, and
                     their term is in front of ours, convert to a follower *)
                 hn (REQUEST_VOTE, (c_term, c_id, c_log_index, c_log_term)) when c_term > node.term =>
-                    verbose_print (node.id^": Voting yes") node.verbose;
                     send(c_id, (YES_VOTE, node.id));
                     follower (demote c_term () c_id node),
 
@@ -680,15 +669,11 @@ fun leader_node node =
 
                 (* If we receive snapshot from a leader in a higher term,
                 convert to follower *)
-                hn (SNAPSHOT, snapshot, l_id, other_term) when other_term > node.term =>
-                    verbose_print (node.id^": received Snapshot from leader, I must have lost position") node.verbose;
-                    follower (demote other_term l_id () node),
+                hn (SNAPSHOT, snapshot, l_id, other_term) when other_term > node.term => follower (demote other_term l_id () node),
                 
                 (* If we receive AppendEntries from a leader in a higher term,
                 convert to follower *)
-                hn (APPEND_ENTRIES, x, l_id, other_term, prevIndex, prevTerm, commitIndex) when other_term > node.term => 
-                    verbose_print (node.id^": received AppendEntries from leader, I must have lost position") node.verbose;
-                    follower (demote other_term l_id () node),
+                hn (APPEND_ENTRIES, x, l_id, other_term, prevIndex, prevTerm, commitIndex) when other_term > node.term => follower (demote other_term l_id () node),
                 
                 (* Prints log *)
                 hn DEBUG_PRINTLOG =>
@@ -702,9 +687,7 @@ fun leader_node node =
                         val node = case snapshot.snapshot of
                         () => node
                         | _ => {node with log = apply_snapshot snapshot node.log}
-                    in 
-                        verbose_print (node.id^": applying snapshot") node.verbose;
-                        loop node end,
+                    in loop node end,
                 hn _ => loop node
             ]
     in 
@@ -733,7 +716,6 @@ and candidate node =
         fun won_election () = 
             let val (sides, _, _) = node.state_machine
             in
-                verbose_print (node.id^": I won the election") node.verbose;
                 send_sides node.log sides;
                 leader_node ({ 
                     node with leader_info = (new_leader node.all_nodes node.log),
@@ -763,7 +745,6 @@ and candidate node =
                 up-to-date as ours. Because of this, we must have lost the
                 election *)
                 hn (APPEND_ENTRIES, x, l_id, other_term, prevIndex, prevTerm, commitIndex) when other_term >= node.term => 
-                    verbose_print (node.id^": received AppendEntries from leader, I must have lost position") node.verbose;
                     follower ({ node with leader = l_id}),
 
                 (* Election timeout, send out another request vote *)
@@ -781,7 +762,6 @@ and candidate node =
             in if vote_amount >= req_votes then won_election () else loop ()
         end
     in 
-        verbose_print (node.id^": I am now a candidate") node.verbose;
         send_to_all node.all_nodes (REQUEST_VOTE, (node.term, p_id, latestLogIndex, prevLogTerm)) (p_id);
         start_random_timeout (fn () => send(p_id, (VOTE_TIMEOUT, nonce)));
         wait_for_votes ([node.id], 1) 
@@ -798,7 +778,6 @@ and follower node =
             { node with term = c_term, voted_for = c_id } 
         fun loop node start_time = let
             fun start_election () =
-                verbose_print (node.id^": START ELECTION") node.verbose;
                 candidate ({node with term = node.term + 1})
             val _ = receive [
                 (* Starts an election *)
@@ -808,7 +787,6 @@ and follower node =
 
                 (* Sends a re-vote to a candidate we already voted for *)
                 hn (REQUEST_VOTE, (c_term, c_id, c_log_index, c_log_term)) when c_id = node.voted_for =>
-                    verbose_print (node.id^": Voting yes") node.verbose;
                     follower (vote_for c_id c_term node),
                 
                 (* If we receive a vote request, vote yes if: the log is a
@@ -819,10 +797,8 @@ and follower node =
                         val latestLogTerm = get_latest_log_term node.log
                         fun no_vote () =
                             send(c_id, NO_VOTE);
-                            verbose_print (node.id^":voting no") node.verbose;
                             follower node
                         fun yes_vote () =
-                            verbose_print (node.id^": Voting yes") node.verbose;
                             follower (vote_for c_id c_term ({node with term = c_term}))
                     in 
                         if latestLogIndex > c_log_index
@@ -860,8 +836,8 @@ and follower node =
                             state_machine = new_sm, 
                             log = newlog}
                         
-                    in (if accepting then verbose_print (node.id^": ACCEPTING SNAPSHOT") node.verbose; ack ()
-                                else verbose_print (node.id^": REJECTING SNAPSHOT") node.verbose; reject ());
+                    in (if accepting then ack ()
+                                else reject ());
                         loop node (getTime())
                     end,
 
@@ -874,13 +850,9 @@ and follower node =
                             if node.leader = () orelse node.term <= leader_term then l_id
                             else node.leader}
                         val accepting = 
-                            if leader_term < node.term then verbose_print "Old Leader" node.verbose; false
-                            else if latestLogIndex > (get_log_index node.log) then 
-                                verbose_print "Leader is way ahead of me" node.verbose;
-                                false
-                            else if (get_latest_log_term node.log) <> prevLogTerm andalso prevLogTerm > 0 then 
-                                verbose_print "Leader has inconsistent log with me" node.verbose;
-                                false
+                            if leader_term < node.term then false
+                            else if latestLogIndex > (get_log_index node.log) then false
+                            else if (get_latest_log_term node.log) <> prevLogTerm andalso prevLogTerm > 0 then false
                             else true
                         val prev_commit = node.log.commitIndex
                         val newlog = 
@@ -903,12 +875,8 @@ and follower node =
                             else 
                                 applied_log
                     in 
-                        (if accepting then 
-                            verbose_print (node.id^": ACCEPTING") node.verbose; 
-                            ack ()
-                        else 
-                            verbose_print (node.id^": REJECTING") node.verbose;
-                            reject ());
+                        (if accepting then ack ()
+                        else reject ());
                         loop {node with log = snapshot_log, state_machine = new_sm} (getTime())
                     end,
 
@@ -943,7 +911,7 @@ and follower node =
 end
 (* END OF ./libs/nodes/follower.trp *)
 
-    (* A node is dormant until it has received the references of all other nodes. *)
+    (* A node is dormant until it has received the references of all other <nodes. *)
     fun dormant_node node =
         if length(node.all_nodes) < node.node_amount then
             receive [
@@ -955,7 +923,7 @@ end
     
     (* Defines a default node, being a follower in term 1 without a leader and
     the state-machine in its beginning state *)
-    fun default_node id all_nodes node_amount state_machine snapshot_cond verbose = 
+    fun default_node id all_nodes node_amount state_machine snapshot_cond = 
         let val node = {
             all_nodes = all_nodes,
             id = id,
@@ -969,29 +937,28 @@ end
                 | _ => ([], WAIT, fn x => x ()),
             snapshot_cond = snapshot_cond,
             node_amount = node_amount,
-            serialkeys = [],
-            verbose = verbose
+            serialkeys = []
         }
         in dormant_node node
     end
 
     (* Spawn a state-machine on a seperate thread, creates a record*)
-    fun initiate_node state_machine snapshot_cond node_amount id verbose = 
-        spawn (fn () => default_node id [] node_amount state_machine snapshot_cond verbose)
+    fun initiate_node state_machine snapshot_cond node_amount id = 
+        spawn (fn () => default_node id [] node_amount state_machine snapshot_cond)
 
     (* Sends a list of all nodes to all nodes *)
     fun add_refs nodes = 
         map (fn x => send(x, (ADD_NODES, nodes))) nodes
     
     (* Spawn n nodes*)
-    fun initiate_nodes n state_machine snapshot_cond verbose =
+    fun initiate_nodes n state_machine snapshot_cond =
         let val part_init = initiate_node state_machine snapshot_cond n
             fun spawn_nodes n acc_id =
                 case n of
                 0 => []
                 | x => append 
                     (spawn_nodes (x - 1) (acc_id ^ "I")) 
-                    [(part_init acc_id verbose)]
+                    [(part_init acc_id)]
 
             val nodes = spawn_nodes n "I"
         in 
@@ -1000,16 +967,16 @@ end
     end
 
     (* Spawn a state-machine on some alias *)
-    fun initiate_distributed_node state_machine snapshot_cond node_amount id alias verbose = 
-        spawn(alias, fn () => (default_node id [] node_amount state_machine snapshot_cond verbose))
+    fun initiate_distributed_node state_machine snapshot_cond node_amount id alias = 
+        spawn(alias, fn () => (default_node id [] node_amount state_machine snapshot_cond))
 
-    fun initiate_distributed_nodes aliases state_machine snapshot_cond verbose =
+    fun initiate_distributed_nodes aliases state_machine snapshot_cond =
         let val part_init = initiate_distributed_node state_machine snapshot_cond (length(aliases))
             fun spawn_nodes acc acc_id =
                 case acc of 
                 [] => []
                 | h :: t =>
-                    append (spawn_nodes t (acc_id ^ "I")) [part_init acc_id h verbose]
+                    append (spawn_nodes t (acc_id ^ "I")) [part_init acc_id h]
             val nodes = spawn_nodes aliases "I"
         in 
             add_refs nodes;
@@ -1022,32 +989,16 @@ end
 
     (* Spawns a distributed Raft network, which can be dialed into to
     communicate with their state-machines *)
-    fun raft_spawn_alias (state_machine, aliases, snapshot_cond, verbose) = 
-        initiate_distributed_nodes aliases state_machine snapshot_cond verbose
+    fun raft_spawn_alias (state_machine, aliases, snapshot_cond) = 
+        initiate_distributed_nodes aliases state_machine snapshot_cond
     | raft_spawn_alias (state_machine, aliases) = 
-        raft_spawn_alias (state_machine, aliases, 50, false)
+        raft_spawn_alias (state_machine, aliases, 50)
 
     (* Spawns a Raft network, which can be contacted to
     communicate with their state-machines *)
-    fun raft_spawn (state_machine, n, snapshot_cond, verbose) =
-        initiate_nodes n state_machine snapshot_cond verbose
-    | raft_spawn (state_machine) = raft_spawn (state_machine, 5, 50, false)
-
-    (*fun raft_d (state_machine, client_id, aliases, snapshot_cond, verbose) =
-        let val nodes = raft_spawn_alias (state_machine, aliases, snapshot_cond, verbose)
-        in (raft_dial (nodes, client_id), nodes)
-    end
-    | raft_d (state_machine, client_id, aliases) = 
-        raft_d (state_machine, client_id, aliases, 50, false)
-
-    fun raft (state_machine, client_id, n, snapshot_cond, verbose) =
-        let val nodes = raft_spawn (state_machine, n, snapshot_cond, verbose)
-        in (raft_dial (nodes, client_id), nodes)
-    end
-    | raft (state_machine, client_id) = 
-        raft (state_machine, client_id, 5, 50, false)
-
-    val default_aliases = ["@node1", "@node2", "@node3", "@node4", "@node5"]*)
+    fun raft_spawn (state_machine, n, snapshot_cond) =
+        initiate_nodes n state_machine snapshot_cond
+    | raft_spawn (state_machine, n) = raft_spawn (state_machine, n, 50)
 
 in
     [ ("raft_dial", raft_dial)
