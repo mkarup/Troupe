@@ -34,4 +34,4 @@ bin/troupe
 bin/understudy
 trp-rt/out/
 troupecheck/test.trp
-troupecheck/test.py
+troupecheck/*.py
