@@ -317,13 +317,20 @@ Testing the game host using TroupeCheck
         in (interim_res1 andalso interim_res2)
         end 
     
+    fun random_labels_gen val_gen tco size = 
+        let val labels = list(label()) tco size 
+            val res = combined_labeled_value (labels, val_gen) tco size 
+        in res 
+        end
+    
     fun test_bad_do_attack (board, ships) attack = 
         (length (do_attack board ships attack).1) = 11
 
     fun prop_do_att_test() = 
-        for_all ([(labeled_value [`{alice}`, `{bob}`] board_ships_gen), attack_gen], test_do_attack_no_leak)
+        for_all ([(random_labels_gen board_ships_gen), attack_gen], test_do_attack_no_leak)
     
     fun prop_bad_do_att() = 
-        for_all ([(labeled_value [`{alice}`, `{bob}`] board_ships_gen), attack_gen], test_bad_do_attack)
-in troupecheck[prop_do_att_test, prop_bad_do_att] authority
+        for_all ([(labeled_value ([`{alice}`, `{bob}`], board_ships_gen)), attack_gen], test_bad_do_attack)
+    
+in troupecheck[prop_bad_do_att] authority
 end
