@@ -82,12 +82,10 @@ Different utility functions that are used across the library.
         else x :: (remove_nth n xs (i + 1))
 
     fun make_list (f, i) = 
-    case i of 
-    0 => []
-    | _ => append [f()] (make_list (f, i-1))
+        case i of 
+        0 => []
+        | _ => append [f()] (make_list (f, i-1))
     
-    fun abs_value x = 
-    if x < 0 then -x else x 
 
 (* TODO: handle when arguments are passed to a property that does not take arguments *)
     fun apply_args p l tco =
@@ -222,10 +220,10 @@ All of these functions are spawned and then requests or updates may be send to t
         receive [hn ("REQUEST_RND", senderid) =>
                     let val rnd = random()
                         val _ = send (senderid, rnd) 
-                        in rec_rng (append ls [rnd])
+                        in rec_rng (rnd :: ls)
                         end, 
                 hn ("REQUEST_SEQ", senderid) => 
-                    let val _ = send (senderid, ls)
+                    let val _ = send (senderid, (reverse ls))
                     in rec_rng []
                     end]
     
@@ -587,7 +585,7 @@ Handles preparing the recorder RNG, running the tests, calling the shrinker, and
 
     fun troupecheck props auth = 
         let val n = toString (length props)
-            fun troupecheck_aux [] i = exit(auth, 0)
+            fun troupecheck_aux [] i =  exit(auth, 0)
             | troupecheck_aux (x::xs) i =
                 let val _ = write ("\nRunning test " ^ (toString i) ^ " of " ^ n ^ ":\n") auth
                     val res = x() auth
