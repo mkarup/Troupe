@@ -7,7 +7,7 @@ import lists
     This program was only made to test internal vs. external shrinking, and not meant for further usage.*)
 let fun record_shrink_test r = 
         r.theInteger < 50
-    fun prop_record_shrink() = for_all ([(record ["theInteger", "theString"] [integer(), string()])], record_shrink_test)
+    fun prop_record_shrink() = for_all ([(record (["theInteger", "theString"], [integer(), string()]))], record_shrink_test)
 
 (* 
 ------------------------------
@@ -572,7 +572,7 @@ EXTERNAL SHRINKING
                     val inter_shrink_tco = spawn (fn() => init_tc authority ())
                     val pre = ()
                     val ext_val = (external_shrinker ext_shrink_val record_shrink_test pre).1
-                    val int_val = (internal_shrinker ctx_seq [(record ["theInteger", "theString"] [integer(), string()])] record_shrink_test pre size 0 inter_shrink_tco).1
+                    val int_val = (internal_shrinker ctx_seq [(record (["theInteger", "theString"], [integer(), string()]))] record_shrink_test pre size 0 inter_shrink_tco).1
 
                     val ext = append acc.ext [ext_val]
                     val inter = append acc.inter [int_val]

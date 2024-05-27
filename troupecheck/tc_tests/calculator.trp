@@ -1,0 +1,43 @@
+import troupecheck
+let fun calc expr = 
+        case expr of 
+          ("a", x, y) => 
+            let val cx = (calc x) 
+                val cy = (calc y)
+            in 
+                if (cx = "nothing") orelse (cy = "nothing") then  "nothing" else cx + cy 
+            end
+        | ("d", x, y) => 
+            (case calc y of 
+              0 => "nothing"
+            | r => 
+                let val cx = (calc x) 
+                in if (cx = "nothing") orelse (r = "nothing") then "nothing" else cx / r end)
+        | n => n
+
+    fun divSubTerms expr = 
+        case expr of 
+          ("d", _, 0) => false 
+        | (_, x, y) => (divSubTerms x) andalso (divSubTerms y)
+        | _ => true
+
+    fun expr_gen tco tco 0 = integer() tco 0
+        | expr_gen tco size = 
+        let val res = 
+                one_of [(integer() tco (size)),  ("a", (expr_gen tco (size-1)), (expr_gen tco (size-1))), 
+                        ("d", (expr_gen tco (size-1)), (expr_gen tco (size-1)))] tco size
+        in 
+            res
+        end
+    
+    fun expr() = expr_gen 4
+
+    fun prop_calculator() =
+        for_all([expr()], ((fn x => (getType (calc x)) <> "string"), divSubTerms))
+in troupecheck[prop_calculator] authority
+end
+
+
+    
+
+

@@ -86,7 +86,7 @@ BOOLEAN STATEMENTS FOR TESTING.
         n > (bad_half n)
     
     fun record_shrink_test r = 
-        r.theInteger < 50
+         r.theInteger < 50
 
     fun append_always_longer s1 s2 = 
         let fun string_to_list s = 
@@ -111,6 +111,9 @@ BOOLEAN STATEMENTS FOR TESTING.
 
     fun mysort3_keep_length xs = 
         length xs = length (my_quicksort3(xs))
+    
+    fun tuple_shrink_test (number, string) = 
+        number < 50
 
 (* 
 --------------------------------
@@ -121,12 +124,13 @@ PROPERTIES TO RUN WITH TROUPECHECK.
     fun prop_append_always_longer() = for_all ([string(), string()], append_always_longer)
     fun prop_bad_insert() = for_all ([list(integer()), integer()], test_bad_insert)
     fun prop_bad_half() = for_all ([integer()], (test_bad_half, (fn x => x >= 15)))
-    fun prop_record_shrink() = for_all ([(record ["theInteger", "theString"] [integer(), string()])], record_shrink_test)
+    fun prop_record_shrink() = for_all ([(record (["theInteger", "theString"], [integer(), string()]))], record_shrink_test)
     fun prop_shrink_test() = for_all ([integer(), integer(), integer(), integer()], shrink_test)
     fun prop_keep_length() = for_all ([list(integer())], my_sort_keep_length)
     fun prop_mysort2_ordered() = for_all ([list(integer())], mysort2_is_ordered)
     fun prop_mysort3_keep_length() = for_all ([list(integer())], mysort3_keep_length)
+    fun prop_tuple_shrink() = for_all ([tuple([integer(), string()])], tuple_shrink_test)
     val prop_list = [prop_append_always_longer, prop_bad_insert, prop_bad_half, prop_record_shrink, 
-                    prop_shrink_test, prop_keep_length, prop_mysort2_ordered, prop_mysort3_keep_length]
-in troupecheck [prop_record_shrink] authority
+                    prop_shrink_test, prop_keep_length, prop_mysort2_ordered, prop_mysort3_keep_length, prop_tuple_shrink]
+in troupecheck prop_list authority
 end 
