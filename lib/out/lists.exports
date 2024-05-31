@@ -9,6 +9,7 @@ length
 append
 partition
 nth
+contains
 filter
 first
 slice

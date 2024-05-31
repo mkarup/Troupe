@@ -4,17 +4,13 @@ let fun pingpong () =
           val {counter, pid=sender} = receive [hn x => x]
           val _ = send (sender, {counter=counter + 1, pid=self()})
           val _ = print counter
-      in 
-        (if counter + 1 > 100 then 
-        print (getTime()) else ()); 
-        pingpong()
+      in pingpong()
       end
 
 in let val processA = spawn ("@pingpong-listener", pingpong)
         val _ = print processA
         val processB = spawn ("@pingpong-dialer", pingpong)
         val _ = print processB
-        val _ = print (getTime())
         val _ = send (processA,{counter = 1, pid =processB})
     in ()
     end

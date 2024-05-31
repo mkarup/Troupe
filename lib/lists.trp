@@ -56,6 +56,13 @@ let fun map f list =
       in  partition_aux ([],[]) ls 
       end   
 
+    fun contains element list = 
+      case list of
+      [] => false
+      | h :: t =>
+          if h = element then true
+          else contains element t
+
     fun filter f l = case l of
     [] => []
     | h :: t => if f h then h :: (filter f t) else filter f t
@@ -90,6 +97,7 @@ in
     , ("append",  append)
     , ("partition", partition) 
     , ("nth", nth)
+    , ("contains", contains)
     , ("filter", filter)
     , ("first", first)
     , ("slice", slice)
