@@ -28,23 +28,18 @@ let fun sum [] acc = acc
                     | (false, false) => low + (x * (high-low)) 
         in res
         end
-    
-    fun int_gen (low, high) tco size = 
-        let val res = floor (float_gen (low, high+1) tco size)
-        in res
-        end
 
     val inf = 1/0
 
-    fun test_int(timings, 0) = timings
-    | test_int(timings, n) = 
+    fun test_float(timings, 0) = timings
+    | test_float(timings, n) = 
     let val startT = getTime()
-        val _ = int_gen(inf, inf) () n
+        val _ = float_gen(inf, inf) () n
         val endT = getTime()
         val elapsedMilliseconds = endT - startT
         val newTimings = append timings [elapsedMilliseconds]
         val newN = (n-1)
-    in test_int(newTimings, newN)
+    in test_float(newTimings, newN)
     end
-in average (test_int([], 100))
+in average (test_float([], 100))
 end

@@ -28,23 +28,32 @@ let fun sum [] acc = acc
                     | (false, false) => low + (x * (high-low)) 
         in res
         end
-    
-    fun int_gen (low, high) tco size = 
-        let val res = floor (float_gen (low, high+1) tco size)
-        in res
-        end
 
     val inf = 1/0
+    val low = inf 
+    val high = inf
 
-    fun test_int(timings, 0) = timings
-    | test_int(timings, n) = 
-    let val startT = getTime()
-        val _ = int_gen(inf, inf) () n
+    fun test_pattern(timings, 0) = timings
+    | test_pattern(timings, n) = 
+    let val x = random()
+
+        val bool_int = random ()
+            
+        val bool = bool_int < (1/2) 
+        val lInf = low = 1/0 (* check for inf *)
+        val hInf = high = 1/0
+        val startT = getTime()
+        val res = 
+                case (lInf, hInf) of 
+                    (true, true) => if bool then x * n else -x * n
+                    | (true, false) => high - (x * n) 
+                    | (false, true) => low + (x * n)
+                    | (false, false) => low + (x * (high-low))
         val endT = getTime()
         val elapsedMilliseconds = endT - startT
         val newTimings = append timings [elapsedMilliseconds]
         val newN = (n-1)
-    in test_int(newTimings, newN)
+    in test_pattern(newTimings, newN)
     end
-in average (test_int([], 100))
+in average (test_pattern([], 100))
 end

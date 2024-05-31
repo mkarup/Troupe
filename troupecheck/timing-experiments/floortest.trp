@@ -36,15 +36,16 @@ let fun sum [] acc = acc
 
     val inf = 1/0
 
-    fun test_int(timings, 0) = timings
-    | test_int(timings, n) = 
-    let val startT = getTime()
-        val _ = int_gen(inf, inf) () n
+    fun test_floor(timings, 0) = timings
+    | test_floor(timings, n) = 
+    let val float = float_gen(inf, inf) () n
+        val startT = getTime()
+        val _ = floor float
         val endT = getTime()
         val elapsedMilliseconds = endT - startT
         val newTimings = append timings [elapsedMilliseconds]
         val newN = (n-1)
-    in test_int(newTimings, newN)
+    in test_floor(newTimings, newN)
     end
-in average (test_int([], 100))
+in average (test_floor([], 100))
 end
