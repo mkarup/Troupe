@@ -4,7 +4,7 @@ import lists
          so that the troupecheck function does not exit the runtime - i.e. replace the call to 'exit(authority, 0)' 
          with '()', and run make libs, from Troupe directory. 
          Remember to change back! *)
-(* This file times how long it takes takes troupecheck to test a property on tuples, that is always true.
+(* This file times how long it takes takes troupecheck to test a property on an integer, that is always true.
     It times this process 100 times and returns the average *)
 let fun sum [] acc = acc 
     | sum (x::xs) acc =
@@ -16,10 +16,10 @@ let fun sum [] acc = acc
         in (sum_ls/len)
         end
 
-    fun int_commutative x y = 
-        (x + y) = (y + x)
+    fun int_test x = 
+        (getType x) = "number"
     
-    fun prop_int_test() = for_all ([integer(), integer()], int_commutative)
+    fun prop_int_test() = for_all ([integer()], int_test)
 
     fun test_troupecheck(ls, 0) = ls
     | test_troupecheck(ls, n) = 

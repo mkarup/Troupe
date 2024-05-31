@@ -1,0 +1,24 @@
+import lists
+(* This file times how long it takes takes troupe to cons an element in front of a list. *)
+let fun sum [] acc = acc 
+    | sum (x::xs) acc =
+        sum xs (acc+x)
+
+    fun average ls = 
+        let val len = length ls 
+            val sum_ls = sum ls 0 
+        in (sum_ls/len)
+        end
+
+    fun test_strjoin(str, timings, 0) = timings
+    | test_strjoin(str, timings, n) = 
+    let val startT = getTime()
+        val newStr = str ^ "d"
+        val endT = getTime()
+        val elapsedMilliseconds = endT - startT
+        val newTimings = append timings [elapsedMilliseconds]
+        val newN = (n-1)
+    in test_strjoin(newStr, newTimings, newN)
+    end
+in average (test_strjoin("", [], 100))
+end

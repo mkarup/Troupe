@@ -1,0 +1,25 @@
+import lists
+(* This file times how long it takes takes trouep to reverse a list of two elements (the choice sequence in TC has length 2 after generating an integer).
+    It times this done 100 times and returns the average *)
+let fun sum [] acc = acc 
+    | sum (x::xs) acc =
+        sum xs (acc+x)
+
+    fun average ls = 
+        let val len = length ls 
+            val sum_ls = sum ls 0 
+        in (sum_ls/len)
+        end
+
+    fun test_cons(ls, timings, 0) = timings
+    | test_cons(ls, timings, n) = 
+    let val startT = getTime()
+        val _ = reverse ls
+        val endT = getTime()
+        val elapsedMilliseconds = endT - startT
+        val newTimings = append timings [elapsedMilliseconds]
+        val newN = (n-1)
+    in test_cons(ls, newTimings, newN)
+    end
+in average (test_cons([random(), random()], [], 100))
+end
