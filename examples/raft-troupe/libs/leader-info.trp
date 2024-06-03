@@ -1,0 +1,51 @@
+let 
+    (* EXPORT START *)
+
+    (* Generates a default leader info, with the nextIndex of all followers
+    being the nextIndex of the new leader. This can be changed with followers
+    rejecting AppendEntries *)
+    fun new_leader all_nodes log = 
+        let val nextIndex = get_log_index log
+            val index = map (fn id => {peer = id, next = nextIndex + 1}) all_nodes
+            val match_index = map (fn id => {peer = id, match = 0}) all_nodes
+        in {
+            nextIndex = index,
+            matchIndex = match_index
+        } end
+    
+    (* Get the nextIndex of a peer *)
+    fun get_next_index leader_info peer = first (filter (fn (x) => x.peer = peer) leader_info.nextIndex)
+
+    (* Get the matchIndex of a peer *)
+    fun get_match_index leader_info peer = first (filter (fn (x) => x.peer = peer) leader_info.matchIndex)
+
+    (* Updates a cluster member's next-index. This is done after an
+    acknowledgement or rejection. *)
+    fun update_next_index leader_info peer new = let
+        val prevIndex = get_next_index leader_info peer
+        val newIndex = {peer = peer, next = new}
+        val withoutPeer = filter (fn (x) => x.peer <> peer) leader_info.nextIndex
+    in {
+        leader_info with 
+        nextIndex = newIndex :: withoutPeer
+    } end
+
+    (* Updates a cluster member's match-index, denoting how much of their log
+    matches the leader holding the leader info. *)
+    fun update_match_index leader_info peer new = let
+        val prevIndex = get_match_index leader_info peer
+        val newIndex = {peer = peer, match = new}
+        val withoutPeer = filter (fn (x) => x.peer <> peer) leader_info.matchIndex
+    in {
+        leader_info with 
+        matchIndex = newIndex :: withoutPeer
+    } end
+
+    (* Get all follower's matchIndex*)
+    fun get_matches leader_info = map (fn x => x.match) leader_info.matchIndex
+
+    (* Get the highest index of entries that a majority of followers have
+    appended to, by finding the median *)
+    fun calc_highest_commit matches = median matches
+    (* EXPORT END *)
+in () end

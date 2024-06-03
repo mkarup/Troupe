@@ -1,0 +1,164 @@
+(* EXPORT START *)
+fun leader_node node = 
+    let val p_id = self()
+        (* Appends appends all entries from a follower's nextIndex to the leader's log index*)
+        fun append_entries node follower_pid =
+                let val nextIndex = get_next_index node.leader_info follower_pid
+                val logIndex = get_log_index node.log
+            in if logIndex + 1 >= nextIndex.next then 
+                let 
+                    val latestLogIndex = nextIndex.next - 1
+                in 
+                    (* Sends the snapshot if the followers nextIndex is before the Snapshot's lastIncludedIndex *)
+                    if nextIndex.next <= node.log.snapshot.lastIncludedIndex 
+                        then send(follower_pid, (SNAPSHOT, node.log.snapshot, p_id, node.term))
+                    else 
+                        let val entries = get_commands_after_nth node.log.log latestLogIndex node.log.snapshot.lastIncludedIndex
+                            val afterSnapshot = latestLogIndex - node.log.snapshot.lastIncludedIndex
+                            val prevEntryTerm = 
+                                if afterSnapshot > 0 then (get_nth_command node.log latestLogIndex).term 
+                                else node.log.snapshot.lastIncludedTerm
+                        in send(follower_pid, (APPEND_ENTRIES, entries, p_id, node.term, latestLogIndex, prevEntryTerm, node.log.commitIndex))
+                    end
+            end
+            (* A follower should never get more entries than the leader *)
+            else ()
+        end
+
+        (* Convert leader to follower *)
+        fun demote term leader voted_for node = 
+            {node with 
+                term = term, 
+                leader = leader,
+                leader_info = (),
+                voted_for = voted_for}
+
+        fun append_update node msg callback serial = 
+            let val latestLogIndex = get_log_index node.log
+                val prevLogTerm = get_latest_log_term node.log
+                val log = append_message node.log msg callback node.term serial
+                val leader_info = update_match_index node.leader_info p_id (get_log_index log)
+                val leader_info = update_next_index leader_info p_id ((get_log_index log) + 1)
+                val node = {node with log = log, leader_info = leader_info}
+            in node
+        end
+
+        (* Applies all committed log entries that have not already been applied *)
+        fun apply_committed node = 
+            let val prev_commit = node.log.commitIndex
+                val highest_commit = calc_highest_commit (map (fn x => x.match) node.leader_info.matchIndex)
+                val node = { node with log = update_commit node.log highest_commit }
+                val (applied_log, new_sm) = apply_log node.log node.state_machine true node.settings.leader_dialer_settings
+                val snapshot_log = 
+                    if prev_commit < highest_commit then 
+                        evaluate_snapshot_cond new_sm node.snapshot_cond applied_log
+                    else 
+                        applied_log
+                val (_, status, _) = new_sm
+                val node = { node with log = snapshot_log, state_machine = new_sm}
+            in 
+                case status of
+                "SUS" => if log_is_committed node.log then append_update node () (fn () => ()) (mkuuid())
+                    else node
+                | _ => node
+        end
+            
+        val nonce = mkuuid ()
+        
+        fun loop node =
+            receive [
+                (* Halts the leader *)
+                hn "DEBUG_PAUSE" =>
+                    let fun pause () = receive [
+                        hn ("DEBUG_CONTINUE") => loop node,
+                        hn x => pause ()
+                    ]
+                    in pause () end,
+
+                hn ("SEND_HEARTBEAT", x) when nonce = x => 
+                    leader_node node,
+
+                (* Message has not been appended before *)
+                hn (("RAFT_UPDATE", x), dialer_id, serial_n) => 
+                    let val (cond, sks) = apply_serialkey node.serialkeys serial_n
+                    in if cond then let
+                        val (_, stat, _) = node.state_machine
+                        val node = case stat of 
+                            "SUS" => send(dialer_id, (DIALER_SM_BUSY, serial_n)); node
+                            | "DONE" => send(dialer_id, (DIALER_SM_DONE, serial_n)); node
+                            | "WAIT" => 
+                                if log_is_committed node.log then
+                                    let fun replication_cb () = send (dialer_id, (DIALER_ACK, serial_n))
+                                    in append_update node x replication_cb serial_n end
+                                else send(dialer_id, (DIALER_SM_BUSY, serial_n)); node
+                        in leader_node node end
+                    else send(dialer_id, (DIALER_ACK, serial_n));
+                        loop node
+                    end,
+
+                (* If append is successful on a follower*)
+                hn ("ACKNOWLEDGE", (peer, logIndex)) => 
+                    let val prev_index = get_log_index node.log
+                        val node = { node with leader_info = update_match_index node.leader_info peer logIndex }
+                        val node = { node with leader_info = update_next_index node.leader_info peer (logIndex + 1) }
+                        val node = apply_committed node
+                        val next_index = get_next_index node.leader_info peer
+                    in (if not node.settings.TIE_COMMITS_TO_HEARTBEAT andalso 
+                        prev_index < get_log_index node.log then 
+                            map (fn x => append_entries node x) 
+                                (filter (fn x => 
+                                    let val next_index = get_next_index node.leader_info x 
+                                    in x <> p_id andalso next_index.next > logIndex end) node.all_nodes)
+                        else ());
+                        loop node
+                    end,
+
+                (* If append is unsuccessful *)
+                hn ("REJECT", (peer, terminfo, logIndex)) => 
+                    if node.term >= terminfo.term then 
+                        let val node = { node with leader_info = update_next_index node.leader_info peer (logIndex + 1) } 
+                        in loop node 
+                        end
+                    else follower (demote terminfo.term terminfo.leader ()
+                    node),
+
+                (* If another node has been elected as a candidate, and
+                    their term is in front of ours, convert to a follower *)
+                hn ("REQUEST_VOTE", (c_term, c_id, c_log_index, c_log_term)) when c_term > node.term =>
+                    send(c_id, (YES_VOTE, node.id));
+                    follower (demote c_term () c_id node),
+
+                hn ("REQUEST_VOTE", (c_term, c_id, c_log_index, c_log_term)) =>
+                    send(c_id, (NO_VOTE, node.id));
+                    loop ({node with term = max c_term node.term}),
+
+                (* If we receive snapshot from a leader in a higher term,
+                convert to follower *)
+                hn ("SNAPSHOT", snapshot, l_id, other_term) when other_term > node.term => follower (demote other_term l_id () node),
+                
+                (* If we receive AppendEntries from a leader in a higher term,
+                convert to follower *)
+                hn ("APPEND_ENTRIES", x, l_id, other_term, prevIndex, prevTerm, commitIndex) when other_term > node.term => follower (demote other_term l_id () node),
+                
+                (* Prints log *)
+                hn "DEBUG_PRINTLOG" =>
+                    pretty_print_log node.id node.log;
+                    loop node,
+
+                (* Applies a snapshot *)
+                hn "DEBUG_APPLYSNAPSHOT" =>
+                    let 
+                        val snapshot = get_snapshot node.state_machine node.log
+                        val node = case snapshot.snapshot of
+                        () => node
+                        | _ => {node with log = apply_snapshot snapshot node.log}
+                    in loop node end,
+                hn _ => loop node
+            ]
+    in 
+        (* Append entries for each follower *)
+        map (fn x => append_entries node x) (filter (fn x => x <> p_id) node.all_nodes);
+        start_timeout (fn () => send (p_id, (SEND_HEARTBEAT, nonce))) node.settings.HEARTBEAT_INTERVAL;
+        loop node
+end
+(* EXPORT END *)

@@ -1,0 +1,70 @@
+(* EXPORT START *)
+and candidate node =
+    let val p_id = self()
+
+        (* A candidate cannot vote for anyone and has no leader *)
+        val node = {node with voted_for = (), leader = ()}
+        val nonce = mkuuid()
+
+        (* Sends a vote request to all followers *)
+        val latestLogIndex = get_log_index node.log
+        val prevLogTerm = get_latest_log_term node.log
+        
+
+        (* Becoming a leader requires majority vote *)
+        val req_votes = ((length node.all_nodes) / 2)
+        
+        fun won_election () = 
+            let val (sides, _, _) = node.state_machine
+            in
+                send_sides node.log sides;
+                leader_node ({ 
+                    node with leader_info = (new_leader node.all_nodes node.log),
+                    leader = (p_id)})
+        end
+        
+        fun wait_for_votes (follower_votes, vote_amount) = 
+            let 
+                fun loop () = receive [
+                (* Received a vote from a follower we have not already
+                received a vote from *)
+                hn ("YES_VOTE", follower_id) when (not (contains follower_id follower_votes)) => 
+                    wait_for_votes ((append follower_votes [follower_id]), vote_amount + 1),
+
+                (*We received a NO_VOTE from a follower in a later term.
+                This can only happen if there is a leader/candidate in this
+                term, and as such, we convert to a follower *)
+                hn ("NO_VOTE", other_term) when other_term > node.term =>
+                    follower node,
+
+                (* Received vote request from candidate in later term *)
+                hn ("REQUEST_VOTE", (c_term, other_c_id, c_log_index, c_log_term)) when c_term > node.term =>
+                    send(other_c_id, (YES_VOTE, node.id));
+                    follower ({ node with term = c_term, voted_for = other_c_id}),
+                
+                (* Received message from leader in a term at least as
+                up-to-date as ours. Because of this, we must have lost the
+                election *)
+                hn ("APPEND_ENTRIES", x, l_id, other_term, prevIndex, prevTerm, commitIndex) when other_term >= node.term => 
+                    follower ({ node with leader = l_id}),
+
+                (* Election timeout, send out another request vote *)
+                hn ("VOTE_TIMEOUT", x) when x = nonce => candidate {node with term = node.term + 1},
+
+                (* Halts the candidate *)
+                hn ("DEBUG_PAUSE") =>
+                    let fun loop () = receive [
+                        hn ("DEBUG_CONTINUE") => (),
+                        hn x => loop ()
+                    ]
+                    in loop () end,
+                hn _ => loop ()
+            ]
+            in if vote_amount >= req_votes then won_election () else loop ()
+        end
+    in 
+        send_to_all node.all_nodes (REQUEST_VOTE, (node.term, p_id, latestLogIndex, prevLogTerm)) (p_id);
+        start_random_timeout (fn () => send(p_id, (VOTE_TIMEOUT, nonce))) node.settings;
+        wait_for_votes ([node.id], 1) 
+end
+(* EXPORT END *)

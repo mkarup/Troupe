@@ -1,0 +1,30 @@
+import lists
+
+datatype Atoms = WAIT|SUS|DONE
+
+let (* EXPORT START *)
+  fun keyval () = 
+    let 
+
+      fun main store x = case x of 
+        ("GET", key, callback) => (
+          [(callback, first (filter (fn (x,_) => x key) store))], 
+          WAIT, 
+          main store
+        )
+
+        | ("SET", (key, value)) => (
+          [], 
+          WAIT, 
+          main ((key, value) :: store)
+        )
+
+        | _ => ([], WAIT, main store)
+
+    in ([], WAIT, main [])
+  end (* EXPORT END *)
+
+in test ()
+end
+
+
