@@ -438,8 +438,8 @@ However, it can be done if the users wishes to and understands what is going on.
             "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
             "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
             "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
-            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
-            val x = (int_gen (1, ((length chars)-1)) tco size)
+            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] (* length: 62 *)
+            val x = (int_gen (1, (62-1)) tco size)
         in nth chars x 
         end
 
@@ -477,14 +477,16 @@ However, it can be done if the users wishes to and understands what is going on.
         in res 
         end 
     
-        (* NOTE: Generates only strings of letters (upper and lower case) and numbers. *)
+    (* NOTE: Generates only strings of letters (upper and lower case) and numbers. *)
     fun string_gen tco size = 
-        let val char_ls = list_gen (char_gen) tco size
-            val string = list_to_string char_ls tco
+        let val length = (int_gen (0, size) tco size)
+            fun string_aux acc 0 = acc 
+            | string_aux acc i = string_aux ((char_gen tco size) ^ acc) (i-1) 
+            val string = (string_aux "" length)
         in string
         end
 
-    and list_gen () tco size = 
+    fun list_gen () tco size = 
         let val len = (int_gen (0, size) tco size)
             val gen = generator_gen tco size
             val res = make_list ((fn () => gen tco size), len) 
@@ -585,7 +587,7 @@ Handles preparing the recorder RNG, running the tests, calling the shrinker, and
 
     fun troupecheck props auth = 
         let val n = toString (length props)
-            fun troupecheck_aux [] i =  exit(auth, 0)
+            fun troupecheck_aux [] i = exit(auth, 0)
             | troupecheck_aux (x::xs) i =
                 let val _ = write ("\nRunning test " ^ (toString i) ^ " of " ^ n ^ ":\n") auth
                     val res = x() auth
