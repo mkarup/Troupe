@@ -43,16 +43,14 @@ let fun eval exp env =
                 in
                     interpretHelper rest newEnv
                 end
-            val stmts = remove_nth ((length prog)-1) prog 0
-            val exp = nth prog (length prog)
+            val (stmts, exp) = prog
             val last_env = (interpretHelper stmts [])
         in
             eval exp last_env
         end
     
     fun optimize_prog prog =
-        let val stmts = remove_nth ((length prog)-1) prog 0
-            val exp = nth prog (length prog)
+        let val (stmts, exp) = prog
             fun optimize_exp exp =
                 case exp of
                 ("num", n) => ("num", n)
@@ -87,7 +85,7 @@ let fun eval exp env =
                 ("assign", var, exp) => ("assign", var, (optimize_exp exp))
                 | ("print", exp) => ("print", (optimize_exp exp))
         in
-            append (map optimize_stmt stmts) [optimize_exp exp]
+            ((map optimize_stmt stmts), optimize_exp exp)
         end 
 
     fun exp_gen ls nesting_level tco size = 
@@ -166,7 +164,7 @@ let fun eval exp env =
                 end 
             val (prog_stmts, last_env) = prog_gen_aux [] [] num_of_insts
             val last_exp = exp_gen last_env 0 tco size
-            val prog = append prog_stmts [last_exp]                  
+            val prog = (prog_stmts, last_exp)                  
         in 
             prog
         end

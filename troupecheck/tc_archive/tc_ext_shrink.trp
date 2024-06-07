@@ -11,6 +11,10 @@ let val out = getStdout authority
         let fun aux_toString acc (x0::x1::xs) = aux_toString (acc ^ (toString x0) ^ ", ") (x1::xs)
             | aux_toString acc (x::xs) = acc ^ (toString x) in 
         aux_toString "" args end
+    
+    fun nth (x::l) 1 = x
+      | nth (x::l) n = nth l (n - 1)
+      | nth x y = print x; print y; exit (authority, 0)
 (* 
 --------------------------------
 ERROR HANDLING - w
@@ -299,7 +303,7 @@ SHRINKING - r
         | _ => 
             let val init_shrink_idx = args.shrink_idx
                 val newArgs = mapi (fn (i, x) => if i = init_shrink_idx then (nth args.shrinkers (i+1)) x else x) args.args
-                val nextState = if (foldl (fn (x,y) => (x.state = "done") andalso y) true newArgs) then "done" else "cont" 
+                val nextState = if (foldl (fn (x,y) => (x.state = "done") andalso y) true newArgs) then "done" else "cont"
                 val shrink_idx = if (nth newArgs (init_shrink_idx+1)).state = "done" then init_shrink_idx+1 else init_shrink_idx
 
             in 
@@ -307,7 +311,7 @@ SHRINKING - r
             end
 
     fun shrink_aux args prop pre counter = 
-        if counter = 100 then report_error ("shrinking_looped", 0) else
+        if counter = 1000 then report_error ("shrinking_looped", 0) else
         let val shrunk_args = args_shrink args 
             val shrunk_args_raw = map (fn x => x.curr) shrunk_args.args 
             val precond_is_met = if (pre <> ()) then (apply_args pre shrunk_args_raw) else true in
@@ -317,11 +321,13 @@ SHRINKING - r
                 if shrunk_args.state = "done" then {shrunk_ctx = shrunk_args_raw, count = counter} else shrink_aux shrunk_args prop pre (counter+1) end
 
     fun shrink args prop pre = 
-        let val shrinkers = map (fn x => x.shrinker) args 
+        let val start_time = getTime()
+            val shrinkers = map (fn x => x.shrinker) args 
             val args_shrink_ready = map (fn x => {state = "init", curr = x.raw, prev = x.raw}) args
             val args_rec = {state = "init", args = args_shrink_ready, shrinkers = shrinkers, shrink_idx = 0}
             val res = shrink_aux args_rec prop pre 0 
-        in res end
+            val end_time = getTime()
+        in (res, (end_time - start_time)) end
 (*
 --------------------------------
 GENERATORS - t
@@ -469,12 +475,12 @@ CORE FUNCTIONALITY - a
                 |_ => 
                     report_fail_reason res noOfTests; 
                     write ("\u001B[1m\u001B[34mShrinking\u001B[0m:");
-                    let val shrink_res = shrink res.cEx prop pre in
+                    (* let val shrink_res = shrink res.cEx prop pre in
                     write "\nFailing test case was shrunk to:\n";
                     write (args_toString shrink_res.shrunk_ctx);
-                    write ("\nAfter " ^ (toString shrink_res.count) ^ " iterations.\n");
-                    false
-                    end
+                    write ("\nAfter " ^ (toString shrink_res.count) ^ " iterations.\n"); *)
+                    (false, res.cEx)
+                    (* end *)
         end
     
     fun for_all (generators, p) = run_tests generators p 100 
@@ -482,12 +488,12 @@ CORE FUNCTIONALITY - a
 
     fun troupecheck props = 
         let val n = toString (length props)
-            fun troupecheck_aux [] i = exit (authority, 0)
-            | troupecheck_aux (x::xs) i =
+            fun troupecheck_aux [] acc i = acc
+            | troupecheck_aux (x::xs) acc i =
                 let val _ = write ("\nRunning test " ^ (toString i) ^ " of " ^ n ^ ":\n")
-                    val _ = x()
-                in troupecheck_aux xs (i+1) end
-        in troupecheck_aux props 1 
+                    val res = x()
+                in troupecheck_aux xs res (i+1) end
+        in troupecheck_aux props () 1 
         end
 
 (* 
@@ -523,10 +529,31 @@ CONVENIENCE FUNCTIONS - s
     
     fun record ns ts = rec_gen ns ts
 
-    fun one_of ls = 
-        let val idx = (int_gen (1, (length ls)) ((length ls))).raw
+    fun one_of ls size = 
+        let val {raw, shrinker} = (int_gen (1, (length ls)) ((length ls)))
+            val raw_res = nth ls raw
+            fun oneOf_shrinker inst = 
+                case inst.state of 
+                "init" =>  
+                    let val interim = shrinker {state = inst.state, curr = raw, prev = raw}
+                        val new_idx = if interim.curr < 1 then 1 else interim.curr
+                        val _ = print new_idx
+                        val _ = print ls
+                        val new_pick = nth ls new_idx
+                    in {state = interim.state, curr = new_pick, prev = inst.curr, idx = new_idx, prev_idx = raw}
+                    end
+                | _ =>  
+                    if inst.idx = 1 then {inst with state = "done"} 
+                    else
+                        let val interim = shrinker {state = inst.state, curr = inst.idx, prev = inst.prev_idx}
+                            val new_idx = if interim.curr < 1 then 1 else interim.curr
+                            val _ = print new_idx
+                            val _ = print ls
+                            val new_pick = nth ls new_idx
+                        in {state = interim.state, curr = new_pick, prev = inst.curr, idx = new_idx, prev_idx = inst.idx}
+                        end
         in 
-            nth ls idx
+            {raw = raw_res, shrinker = oneOf_shrinker}
         end   
 (* 
 --------------------------------
@@ -728,8 +755,7 @@ CUSTOM TYPE PROGRAM
                 in
                     interpretHelper rest newEnv
                 end
-            val stmts = remove_nth ((length prog)-1) prog 0
-            val exp = nth prog (length prog)
+            val (stmts, exp) = prog
             val last_env = (interpretHelper stmts [])
         in
             eval exp last_env
@@ -913,14 +939,14 @@ CUSTOM TYPE PROGRAM
                 in 
                     prog_gen_aux newEnv (append p [stmt.raw]) (append s [stmt.shrinker]) (i-1)
                 end 
-            val (prog_stmts, shrinkers_interim, last_env) = prog_gen_aux [] [] [] num_of_insts
+            val (prog_stmts, stmts_shrinkers, last_env) = prog_gen_aux [] [] [] num_of_insts
             val last_exp = exp_gen last_env 0 size
-            val prog = append prog_stmts [last_exp.raw]
-            val shrinkers = append shrinkers_interim [last_exp.shrinker]
-            fun shrinker inst = 
+            val prog = (prog_stmts, last_exp.raw)
+            fun stmts_shrinker inst = 
                 case inst.state of 
                 "init" => 
-                    let val shrunk = shrink_list shrinkers inst 
+                    let 
+                        val shrunk = shrink_list stmts_shrinkers inst 
                     in 
                         shrunk 
                     end 
@@ -929,21 +955,21 @@ CUSTOM TYPE PROGRAM
                     in  
                         if next_elem.0 = "assign" then 
                             if (assign_in_use inst.curr [] (next_elem.1) 0 false).0 then 
-                                print "testing";
                                 {inst with idx = inst.idx-1} 
                             else if (next_elem.0 = "var") orelse (next_elem.0 = "num") orelse (next_elem.0 = "add") orelse (next_elem.0 = "sub") orelse
                                     (next_elem.0 = "mul") orelse (next_elem.0 = "div") then
                                 {inst with idx = inst.idx-1} 
 
                             else
-                                shrink_list shrinkers inst 
+                                shrink_list stmts_shrinkers inst 
                         else 
-                            shrink_list shrinkers inst 
+                            shrink_list stmts_shrinkers inst 
                     end
                 | _ => 
-                    shrink_list shrinkers inst                      
+                    shrink_list stmts_shrinkers inst   
+            val stmts_val = {raw = prog_stmts, shrinker = stmts_shrinker}                 
         in 
-            {raw = prog, shrinker = shrinker}
+            {raw = prog, shrinker = shrink_sized_aggregate [stmts_val, last_exp] build_tuple}
         end
     
     fun test_prog_opt prog = 
@@ -954,6 +980,93 @@ CUSTOM TYPE PROGRAM
         r.theInteger < 50
     fun prop_program_shrink() = for_all ([program_gen], test_prog_shrink)
     fun prop_record_shrink() = for_all ([(record ["theInteger", "theString"] [integer(), string()])], record_shrink_test)
+
+    fun even_number_gen size = 
+        let val {raw, shrinker} = integer() size 
+            val raw_res = raw * 2
+            fun this_shrinker inst = 
+                let val interim = shrinker {inst with curr = (inst.curr / 2), prev = (inst.prev / 2)}
+                    val res = {interim with curr = (interim.curr * 2), prev = (interim.prev * 2)}
+                in res
+                end
+        in {raw = raw_res, shrinker = this_shrinker}
+        end
+
+    fun even_test i = 
+        (i mod 2 = 0) andalso (i < 10)
+    fun even_stmt() = 
+        for_all ([even_number_gen], even_test)    
+
+    fun test_shrinking stmt prop n = 
+        let fun aux acc 0 = acc 
+            | aux acc i = 
+                let val (_, ctx) = troupecheck [stmt] 
+                    val _ = print i
+                    val pre = ()
+                    val timing = (shrink ctx prop pre).1
+                    val newAcc = timing :: acc
+                    in aux newAcc (i-1)
+                    end
+        in 
+            aux [] n
+        end
+    
+    (* -----------Tests the shrinking of a record with an integer and a string *)
+    fun record_shrink_test r = 
+        r.theInteger < 50
+    
+
+    (* -----------Tests the shrinking of a two strings*)
+    fun append_always_longer s1 s2 = 
+        let fun string_to_list s = 
+            let fun aux "" acc = acc 
+                | aux s acc = 
+                    let val x = substring (s, 0, 1)
+                        val xs = substring (s, 1, 1/0) 
+                    in aux xs (append acc [x]) 
+                    end 
+            in aux s [] 
+            end
+        fun string_length s = 
+            length (string_to_list s)
+        in string_length s1 < string_length (s1 ^ s2)
+        end
+
+    (* -----------Tests the shrinking of a list of integers *)
+    fun filter_less ([], _) = []
+    | filter_less ((x::xs), p) = 
+        if x < p then append [x] (filter_less (xs, p)) else (filter_less (xs, p))
+
+    fun filter_greater ([], _) = []
+    | filter_greater ((x::xs), p) = 
+        if x > p  then append [x] (filter_greater (xs, p)) else (filter_greater (xs, p))
+
+
+    fun my_quicksort [] = []
+    | my_quicksort (x::xs) =
+        let val smaller = my_quicksort(filter_less(xs, x))
+            val greater = my_quicksort(filter_greater(xs, x)) in 
+        append (append smaller [x]) (greater) end 
+    fun my_sort_keep_length xs = 
+        length xs = length (my_quicksort(xs))
+
+    (* -----------Tests the shrinking of a list of strings and a single string *)
+    fun bad_insert xs x = 
+        if length xs < 10 then append [x] xs else
+        xs
+    fun test_bad_insert xs x =
+        length (bad_insert xs x) = (length xs) + 1 
+    
+    (* -----------Tests the shrinking of a float and a one_of statement with a long list *)
+    fun float_one_of_bad_shrink flt oneOf = 
+        if (flt > 50) andalso (oneOf >= 1) then false else true
+
+
+    fun record_int_string_shrink() = for_all ([(record (["theInteger", "theString"], [integer(), string()]))], record_shrink_test)
+    fun two_strings_shrink() = for_all ([string(), string()], append_always_longer)
+    fun integer_list_shrink() = for_all ([list(integer())], my_sort_keep_length)
+    fun string_and_string_list_shrink() = for_all ([list(string()), string()], test_bad_insert)
+    fun float_and_one_of_shrink() = for_all ([float(), one_of [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]], float_one_of_bad_shrink)
 in
 
 (*
@@ -962,7 +1075,7 @@ ALL TESTS - x
 -------------------------------- 
 *)
 
-troupecheck[prop_record_shrink]
+print (test_shrinking float_and_one_of_shrink float_one_of_bad_shrink 100)
 (* tc [program_gen] test_prog_opt  *)
 
 (* shrinking tests - x *)
