@@ -49,15 +49,10 @@ Handles the printing of appropriate error messages for errors that may occur in 
         let val _ = send (tco, ("REQUEST_AUTH", self()))
             val auth = receive [hn x => x]
             val err_string = case error_reason of 
-            ("cant_generate", tries) => "Couldn't produce an instance that satisfies all strict constraints after "
-                                            ^ (toString tries) ^ " tries.\n"
-            | ("cant_satisfy", tries) => "No valid test could be generated after " ^ (toString tries) ^ " tries.\n"
+             ("cant_satisfy", tries) => "No valid test could be generated after " ^ (toString tries) ^ " tries.\n"
             | ("non_boolean_result", _) => "The property or precondition code returned a non-boolean result.\n"
             | ("type_mismatch", _) => "The types' structure doesn't match the property.\n"
-            | ("illegal_gen_def", _ ) => "Generator is defined wrong - use tuple() or record() to combine generators.\n"
             | ("record_mismatch", _) => "the number of names provided for record generation, does not match the number of types provided.\n"
-            | ("shrinking_looped", _) => "Shrinking looped.\n"
-            | ("non_string_type", _) => "An element of non-string type found when trying to convert list to string.\n"
         in
         write "\u001B[31m \nError: " auth; (* Changing the print color to red *)
         write (err_string ^ "\u001B[0m") auth; (* Changing the color back *)
@@ -105,21 +100,6 @@ Different utility functions that are used across the library.
                 in declassify (res, auth, `{}`)
             end
         end
-    
-    fun string_to_list s = 
-        let fun aux "" acc = acc 
-            | aux s acc = 
-                let val x = substring (s, 0, 1)
-                    val xs = substring (s, 1, 1/0) in 
-                aux xs (append acc [x]) end in 
-        aux s [] end
-    
-    (* Combines a list of individual strings to a single string *)
-    fun list_to_string ls tco = 
-        foldl (fn (x,y) => if getType x <> "string" then report_error ("non_string_type", 0) tco else y ^ x) "" ls
-    
-    fun string_length s = 
-        length (string_to_list s)
 
     fun report_fail_reason rec noOfTests tco =
         let val _ = send (tco, ("REQUEST_AUTH", self()))
@@ -479,35 +459,18 @@ However, it can be done if the users wishes to and understands what is going on.
     
     (* NOTE: Generates only strings of letters (upper and lower case) and numbers. *)
     fun string_gen tco size = 
-        let val length = (int_gen (0, size) tco size)
+        let val len = (int_gen (0, size) tco size)
             fun string_aux acc 0 = acc 
             | string_aux acc i = string_aux ((char_gen tco size) ^ acc) (i-1) 
-            val string = (string_aux "" length)
+            val string = (string_aux "" len)
         in string
         end
 
-    fun list_gen () tco size = 
-        let val len = (int_gen (0, size) tco size)
-            val gen = generator_gen tco size
-            val res = make_list ((fn () => gen tco size), len) 
-        in res
-        end
-    | list_gen (generator) tco size = 
+    fun list_gen (generator) tco size = 
         let val len = (int_gen (0, size) tco size)
             val res = make_list ((fn () => generator tco size), len) 
         in res
         end
-    
-    and generator_gen tco size = 
-        let val inf = 1/0
-            val gens_ls = 
-                case (size mod 3) of 
-                0 => [(float_gen (inf, inf)), (int_gen(inf, inf)), bool_gen, char_gen, string_gen]
-                | _ => [(float_gen (inf, inf)), (int_gen(inf, inf)), bool_gen, (list_gen(generator_gen tco (size-1))), char_gen, string_gen,
-                            (tuple_gen (list_gen(generator_gen tco (size-1)))), (rec_gen (list_gen(string_gen)) ((generator_gen tco (size-1)))), 
-                            (labeled_value_gen (list_gen(string_gen)) (generator_gen tco (size-1)))]
-            val gen = one_of gens_ls tco size
-        in gen end
         
 (* 
 --------------------------------
@@ -620,14 +583,12 @@ These are functions that make it easier for the user to make use of the differen
 
     fun boolean () = bool_gen
 
-    fun list () = list_gen () 
-        |list (type) = list_gen (type)
+    fun list (type) = list_gen (type)
 
     fun string () = string_gen
 
     fun char () = char_gen
 
-    fun generator() = generator_gen
 
     fun tuple (ts) = tuple_gen ts
     
@@ -657,7 +618,6 @@ in
     , ("list", list)
     , ("string", string)
     , ("char", char)
-    , ("generator", generator)
     , ("tuple", tuple)
     , ("labeled_value", labeled_value)
     , ("combined_labeled_value", combined_labeled_value)
