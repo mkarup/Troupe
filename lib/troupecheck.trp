@@ -342,7 +342,7 @@ All of these functions are spawned and then requests or updates may be send to t
         end
     
     fun random_shrink_aux sequences generators prop pre success size counter divi tco =
-        if (counter = 1000) orelse (size = 0) then {count = success, size = size, sequences = sequences} else
+        if (counter = 100) orelse (size = 0) then {count = success, size = size, sequences = sequences} else
         let val _ = send(tco, ("REQUEST_RNG", self()))
             val pid = receive [hn x => x]
             val new_size = floor (size/divi)
