@@ -1,0 +1,4 @@
+import lists
+let val ls = [1,2,3,4]
+in nth ls 2 
+end

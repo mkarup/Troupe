@@ -332,5 +332,5 @@ Testing the game host using TroupeCheck
     fun prop_bad_do_att() = 
         for_all ([(labeled_value ([`{alice}`, `{bob}`], board_ships_gen)), attack_gen], test_bad_do_attack)
     
-in troupecheck[prop_bad_do_att] authority
+in setup () 0
 end
