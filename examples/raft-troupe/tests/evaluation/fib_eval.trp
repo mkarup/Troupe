@@ -1,0 +1,53 @@
+datatype Atoms = WAIT|SUS|DONE
+
+let 
+(* EXPORT START *)
+fun measure_time f = 
+    let val time_start = getTime()
+    in
+        f ();
+        (getTime() - time_start)
+    end
+
+    fun progress_cps cps = case getType cps of
+    "function" => progress_cps (cps ())
+    | x => cps
+
+    fun standard_fib n =
+        let fun loop n a b = case n of 
+        1 => b
+        | n => loop (n - 1) b (a + b)
+        in if n <= 1 then n
+        else loop n 0 1
+    end
+
+    fun cps_fib n =
+        let fun loop n a b = case n of 
+        1 => b
+        | n => (fn () =>
+            let val n = (n - 1)
+            in (fn () => loop n b (a + b))
+            end)
+        in if n <= 1 then n
+        else loop n 0 1
+    end
+
+    fun measure_fib dialer n =
+        let val time_start = getTime()
+        in 
+            send(dialer, (RAFT_UPDATE, ({type = CLIENT, id = dialer}, n)));
+            receive [ hn _ => () ];
+            getTime () - time_start
+    end
+
+    fun measure_runtimes ns =
+        map (fn n =>
+            let val standard_time = (measure_time (fn () => standard_fib n))
+                val cps_time = (measure_time (fn () => progress_cps (cps_fib n)))
+            in (n, standard_time, cps_time) end) ns
+
+
+(* EXPORT END *)
+    val (sides, stat, step) = fib_input (self(), 15)
+in print (sides, stat, step)
+end

@@ -1,0 +1,118 @@
+(* EXPORT START *)
+
+(* Selects a random element from a list *)
+fun random_element list =
+    let fun roundUp n m = 
+            if n <= 0 then m else roundUp (n - 1) (m + 1)
+        val r_n = roundUp (random() * (length list - 1)) 0 
+    in nth list r_n
+end
+
+
+(* Given a list of serialkeys, and a serial key, check if it is valid, and
+return a list containing the serial key if so, and a boolean denoting whether or
+not it is valid. *)
+fun apply_serialkey list key =
+    case list of
+    [] => (true, [])
+    | h :: t =>
+        if h = key then
+            case (h.key, key.key) of
+            ((log_index, seq_numb), (new_log_index, new_seq_numb)) =>
+                if new_log_index > log_index orelse 
+                    (log_index = new_log_index andalso new_seq_numb > seq_numb) then
+                    (true, ({ h with key = key.key } :: t))
+                else (false, h :: t)
+            | (nonce, new_nonce) =>
+                if nonce <> new_nonce then
+                    (true, ({ h with key = key.key } :: t))
+                else (false, h :: t)
+            | _ => (true, ({ h with key = key.key } :: t))
+        else 
+            let val (cond, list) = apply_serialkey t key
+            in (cond, h :: list)
+        end
+
+
+(* Used by the dialer to send message to a cluster. If the nodes are busy or if
+no leader is present, this function re-sends the message until it is eventually
+delivered and acknowledged by the leader of the cluster. If leader is unknown,
+it can be defined as unit.*)
+fun dialer_send_message p_id msg serial_n leader cluster dialer_settings = 
+    let val nonce = mkuuid()
+        val msg_timeout = start_timeout (fn() => send(p_id, (DIALER_MESSAGE_TIMEOUT, nonce)))
+        val busy_timeout = start_timeout (fn() => send(p_id, (DIALER_BUSY_TIMEOUT, nonce)))
+        fun wait () =
+            receive [
+            hn ("NOT_LEADER", leader_id) => 
+                dialer_send_message p_id msg serial_n leader_id cluster dialer_settings,
+            hn ("DIALER_ACK", other_serial) when other_serial = serial_n => 
+                leader,
+            hn ("DIALER_SM_BUSY", other_serial) when other_serial = serial_n =>
+                busy_timeout dialer_settings.DIALER_SM_BUSY_TIMEOUT;
+                wait (),
+            hn ("DIALER_SM_DONE", other_serial) when other_serial = serial_n =>
+                leader,
+            hn ("DIALER_MESSAGE_TIMEOUT", x) => 
+                if x = nonce then dialer_send_message p_id msg serial_n (random_element cluster) cluster dialer_settings
+                else wait (),
+            hn ("DIALER_BUSY_TIMEOUT", x) => 
+                if x = nonce then dialer_send_message p_id msg serial_n leader cluster dialer_settings
+                else wait ()
+        ]
+        in (case leader of
+            () => msg_timeout dialer_settings.DIALER_NOLEADER_TIMEOUT
+            | x =>
+                msg_timeout dialer_settings.DIALER_NOMSG_TIMEOUT; 
+                send(x, msg));
+            wait ()
+end
+
+(* Facilitates client-side interaction to the Raft cluster. Allows the
+programmer to send messages to the cluster in the format (RAFT_UPDATE, msg)*)
+fun dialer cluster client_id dialer_settings = 
+    let val p_id = self()
+        fun update_message x leader = let 
+            val serial_n = mkuuid()
+            in dialer_send_message p_id ((RAFT_UPDATE, x), p_id, serial_n) serial_n leader cluster dialer_settings
+        end
+        val leader = random_element cluster
+
+        fun loop leader sks =     
+            receive [
+                hn ("RAFT_UPDATE", x) =>
+                    loop (update_message x leader) sks,
+
+                hn ("DIALER_CLIENT_MSG", msg, sk) =>
+                    let val (cond, sks) = apply_serialkey sks sk
+                    in 
+                        (if cond then send(client_id, msg)
+                        else ());
+                        loop leader sks
+                end,
+
+                hn ("SEND_TO_NTH", n, x) =>
+                    send_to_nth cluster x n;
+                    loop leader sks,
+
+                hn ("SEND_TO_ALL", x) => 
+                    send_to_all cluster x (self());
+                    loop leader sks,
+                hn _ => loop leader sks ]
+    in loop leader []
+end
+
+(* Temporary dialer sends a list of messages to a cluster before terminating. *)
+fun leader_dialer cluster msgs dialer_settings = 
+    let val p_id = self()
+        val leader = random_element cluster
+    in 
+        map (fn (msg, serial) => dialer_send_message p_id ((RAFT_UPDATE, msg), p_id, serial) serial leader cluster dialer_settings) msgs
+end
+
+(* Send-function used for clusters to send a message to either the dialer or
+client. *)
+fun raft_send (process, msgs) dialer_settings = case process.type of
+"CLIENT" => map (fn (msg, sk) => send(process.id, (DIALER_CLIENT_MSG, msg, sk))) msgs
+| "CLUSTER" => spawn (fn () => leader_dialer process.id msgs dialer_settings)
+(* EXPORT END *)

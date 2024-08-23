@@ -1,0 +1,35 @@
+(* EXPORT START *)
+fun ping_badactor () = let 
+  val pid = self ()
+  val ping_cluster = raft_spawn ((), ["@node1", "@node2", "@node3", "@node4", "@node5"])
+  val dialer = raft_dial (ping_cluster, pid)
+  val _ =
+    send(dialer, (RAFT_UPDATE, (fn () => ping_server { type = CLUSTER, id = ping_cluster})));
+    spawn (fn () => bad_actor ping_cluster 11 1000 true)
+  
+  fun loop x = let
+    val _ = send (dialer, (RAFT_UPDATE, ({type=CLIENT, id=dialer}, x)))
+    val new_x = receive [hn (c, x) => x]
+  in 
+    print new_x;
+    if new_x > x then
+      loop new_x 
+    else 
+      print "ERROR IN PING"
+  end 
+in loop 0
+end
+
+
+fun ping_pong_cluster_test () = 
+    let val pid = self ()
+        val ping_cluster = raft_spawn () 
+        val pong_cluster = raft_spawn ()
+        val dialer = raft_dial (ping_cluster, pid)
+        val dialer2 = raft_dial (pong_cluster, pid) 
+    in 
+        send(dialer, (RAFT_UPDATE, (fn () => ping_server { type = CLUSTER, id = ping_cluster})));
+        send(dialer2, (RAFT_UPDATE, (fn () => ping_server { type = CLUSTER, id = pong_cluster})));
+        send_delay(dialer, (RAFT_UPDATE, ({ type = CLUSTER, id = pong_cluster}, 0))) 5000
+end
+(* EXPORT END*)

@@ -1,0 +1,142 @@
+(* EXPORT START *)
+and follower node = 
+    let val nonce = mkuuid()
+        val p_id = self()
+        val _ = start_random_timeout (fn () => send(p_id, (ELECTION_TIMEOUT, nonce))) node.settings
+        (* Sends a YES_VOTE to a candidate *)
+        fun vote_for c_id c_term node = 
+            send(c_id, (YES_VOTE, node.id));
+            { node with term = c_term, voted_for = c_id } 
+        fun loop node = let
+            fun start_election () =
+                candidate ({node with term = node.term + 1})
+            val _ = receive [
+                (* Starts an election *)
+                hn ("ELECTION_TIMEOUT", x) when x = nonce => start_election (),
+
+                (* Sends a re-vote to a candidate we already voted for *)
+                hn ("REQUEST_VOTE", (c_term, c_id, c_log_index, c_log_term)) when c_id = node.voted_for =>
+                    follower (vote_for c_id c_term node),
+                
+                (* If we receive a vote request, vote yes if: the log is a
+                up-to-date and the term of the candidate is later than our
+                current. Vote no otherwise *)
+                hn ("REQUEST_VOTE", (c_term, c_id, c_log_index, c_log_term)) =>
+                    let val latestLogIndex = get_log_index node.log
+                        val latestLogTerm = get_latest_log_term node.log
+                        val old_term = node.term
+                        val node = {node with term = max c_term old_term}
+                        fun no_vote () =
+                            send(c_id, NO_VOTE);
+                            follower node
+                        fun yes_vote () =
+                            follower (vote_for c_id c_term ({node with term = c_term}))
+                    in 
+                        if latestLogIndex > c_log_index
+                        orelse latestLogTerm <> c_log_term
+                        orelse node.term = old_term then no_vote ()
+                        else yes_vote ()
+                    end,
+
+                (* When receiving a snapshot from a leader in a later or
+                same term, acknowledge if it contains entries past our
+                current log index. Update leader and term accordingly. *) 
+                hn ("SNAPSHOT", x, l_id, leader_term) => 
+                    let val node = {node with leader = 
+                            if node.leader = () orelse node.term < leader_term then l_id 
+                            else node.leader} 
+
+                        val {snapshot, lastIncludedIndex, lastIncludedTerm} = x 
+                        val log_term = get_latest_log_term node.log 
+                        val log_index = get_log_index node.log
+
+                        val accepting = 
+                            if leader_term < node.term then false
+                            else if lastIncludedIndex <= log_index then false
+                            else true
+
+                        val newlog = if accepting then apply_snapshot x node.log else node.log
+                        val new_sm = if accepting then snapshot else node.state_machine
+                        val reject = 
+                            fn () => send (l_id, (REJECT, (p_id, {term = node.term, leader = node.leader}, (get_log_index newlog))))
+                        val ack = 
+                            fn () => send (l_id, (ACKNOWLEDGE, (p_id, get_log_index newlog)))
+
+                        val node = {
+                            node with term = (if node.term < leader_term then leader_term else node.term), 
+                            state_machine = new_sm, 
+                            log = newlog}
+                    in (if accepting then ack ()
+                                else reject ());
+                        follower node
+                    end,
+
+                (* When receiving entries from a leader in a later or
+                same term, acknowledge if it contains entries past our
+                current log index. And if the latest log index matches ours.
+                Update log accordingly.*)
+                hn ("APPEND_ENTRIES", x, l_id, leader_term, latestLogIndex, prevLogTerm, leaderCommit) => 
+                    let val node = {node with leader = 
+                            if node.leader = () orelse node.term <= leader_term then l_id
+                            else node.leader}
+                        val accepting = 
+                            if leader_term < node.term then false
+                            else if latestLogIndex > (get_log_index node.log) then false
+                            else if (get_latest_log_term node.log) <> prevLogTerm andalso prevLogTerm > 0 then false
+                            else true
+                        val prev_commit = node.log.commitIndex
+                        val newlog = 
+                            if accepting then
+                                let val log = rollback_log_to node.log latestLogIndex
+                                    val log = add_entries_to_log log x leader_term
+                                in update_commit log (min leaderCommit (get_log_index log)) 
+                                end
+                            else node.log
+                        val reject = 
+                            fn () => send (l_id, (REJECT, (p_id, {term = node.term, leader = node.leader}, (get_log_index newlog))))
+                        val ack = 
+                            fn () => send (l_id, (ACKNOWLEDGE, (p_id, get_log_index newlog)))
+
+                        val node = {node with term = (if node.term < leader_term then leader_term else node.term)}
+                        val (applied_log, new_sm) = apply_log newlog node.state_machine false node.settings.leader_dialer_settings
+                        val snapshot_log =
+                            if prev_commit < applied_log.commitIndex then 
+                                evaluate_snapshot_cond new_sm node.snapshot_cond applied_log
+                            else 
+                                applied_log
+                    in 
+                        (if accepting then ack ()
+                        else reject ());
+                        follower {node with log = snapshot_log, state_machine = new_sm}
+                    end,
+
+                (* If client sends update, sends the leader's id *)
+                hn (("RAFT_UPDATE", x), dialer_id, _) => 
+                    send(dialer_id, (NOT_LEADER, node.leader));
+                    loop node,
+
+                (* Prints the log *)
+                hn ("DEBUG_PRINTLOG") =>
+                    pretty_print_log node.id node.log;
+                    loop node,
+
+                (* Halts the follower *)
+                hn ("DEBUG_PAUSE") =>
+                    let fun paused () = receive [
+                        hn ("DEBUG_CONTINUE") => (),
+                        hn _ => paused ()
+                    ]
+                    in
+                        paused ();
+                        loop node
+                    end,
+
+                (* Start an election, electing this follower to a candidate *)
+                hn ("DEBUG_TIMEOUT") => start_election (),
+                hn _ => loop node
+        ]
+        in ()
+    end
+    in loop node
+end
+(* EXPORT END *)

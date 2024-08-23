@@ -1,0 +1,324 @@
+import lists
+
+(*
+    Log = {
+        snapshot: Snapshot
+        log: Entry[],
+        lastApplied: int,
+        internalChanges: int,
+        commitIndex: int,
+        latestSerials: SerialKey[]
+    }
+    Snapshot = {
+        snapshot: Some state
+        lastIncludedIndex: int,
+        lastIncludedTerm: int
+    }
+    Entry = {
+        term: int,
+        command: message,
+        serial: string
+    }
+    SerialKey = {
+        id: clusterId[] | pid,
+        key: (logIndex, number) | nonce
+    }
+*)
+
+(*
+    LeaderInfo = {
+        nextIndex = {
+            peer: p,
+            next: int
+        }[],
+        matchIndex = {
+            peer: p,
+            match: int
+        }[]
+    }
+*)
+
+(*
+    StateMachine = {
+        set_hook : fn (x: string) => x
+        get_hook : fn (x: string, callback_pid: string) => x
+        get_snapshot_hook : fn(callback_pid: string) => x
+        get_changes_hook : fn (callback_pid: string) => x
+        snapshot_condition_hook : fn (log_summary: LogSummary, callback_pid: string) => x: bool
+    }
+    LogSummary = {
+        log_size: int,
+        entries_since_snap: int
+    }
+*)
+
+(*
+    Node = {
+        all_nodes: string[],
+        id: string,
+        log: Log,
+        term: int,
+        voted_for: string,
+        leader: string,
+        leader_info: LeaderInfo,
+        snapshot_condition: fn logSummary => ... : boolean
+        state_machine: ([SIDE-EFFECTS], STATUS, STEP-FUNC)
+        total_nodes: int,
+        verbose: boolean
+    }
+*)
+
+(*
+    RaftProcesses = {
+        type: Client | Cluster,
+        id: pid | Clusterid[]
+    }
+*)
+
+let 
+    (* Constants *)
+    val WAIT = "WAIT"
+    val SUS = "SUS"
+    val DONE = "DONE"
+    val SEND_HEARTBEAT = "SEND_HEARTBEAT"
+    val RAFT_UPDATE = "RAFT_UPDATE"
+    val NOT_LEADER = "NOT_LEADER"
+    val ACKNOWLEDGE = "ACKNOWLEDGE"
+    val REJECT = "REJECT"
+    val ELECTION_TIMEOUT = "ELECTION_TIMEOUT"
+    val REQUEST_VOTE = "REQUEST_VOTE"
+    val YES_VOTE = "YES_VOTE"
+    val NO_VOTE = "NO_VOTE"
+    val VOTE_TIMEOUT = "VOTE_TIMEOUT"
+    val APPEND_ENTRIES = "APPEND_ENTRIES"
+    val SNAPSHOT = "SNAPSHOT"
+    val ADD_NODES = "ADD_NODES"
+    val DIAL = "DIAL"
+    val DIALER_ACK = "DIALER_ACK"
+    val DIALER_SM_BUSY = "DIALER_SM_BUSY"
+    val DIALER_SM_DONE = "DIALER_SM_DONE"
+    val DIALER_CLIENT_MSG = "DIALER_CLIENT_MSG"
+    val DIALER_MESSAGE_TIMEOUT = "DIALER_MESSAGE_TIMEOUT"
+    val DIALER_BUSY_TIMEOUT = "DIALER_BUSY_TIMEOUT"
+    val SEND_TO_NTH = "SEND_TO_NTH"
+    val SEND_TO_ALL = "SEND_TO_ALL"
+    val DEBUG_PRINTLOG = "DEBUG_PRINTLOG"
+    val DEBUG_PAUSE = "DEBUG_PAUSE"
+    val DEBUG_CONTINUE = "DEBUG_CONTINUE"
+    val DEBUG_APPLYSNAPSHOT = "DEBUG_APPLYSNAPSHOT"
+    val DEBUG_SNAPSHOT_COND = "DEBUG_SNAPSHOT_COND"
+    val DEBUG_TIMEOUT = "DEBUG_TIMEOUT"
+    val FUNCTION_DONE = "FUNCTION_DONE"
+    val ERROR_TIMEOUT = "ERROR_TIMEOUT"
+    val CLUSTER = "CLUSTER"
+    val CLIENT = "CLIENT"
+
+    fun not a = a = false
+    val contains = elem
+    fun send_to_all processes msg sender = map (fn x => send(x, msg)) (filter (fn x => x <> sender) processes)
+
+    fun send_to_nth processes msg n = send((nth (reverse processes) n), msg)
+
+    fun max a b = if a < b then b else a 
+
+    fun min a b = if a > b then b else a
+
+    (* #IMPORT libs/quickselect.trp *)
+
+    (* #IMPORT libs/log.trp *)
+
+    (* #IMPORT libs/leader-info.trp *)
+
+    (* Executes a function after a given timeout. *)
+    fun start_timeout func duration = 
+        let fun timeout () = 
+            let val time = duration
+                val _ = sleep time
+            in func ()
+            end
+            val p_id = self()
+        in spawn timeout
+    end
+
+    (* Send message after a delay. *)
+    fun send_delay (to, m) delay =
+        sleep delay;
+        send (to, m)
+
+    (* Starts a random timeout with lower=2sec and upper=4sec *)
+    fun start_random_timeout func settings = start_timeout func (settings.ELECTION_TIMEOUT_LOWER + ((random ()) * (settings.ELECTION_TIMEOUT_UPPER - settings.ELECTION_TIMEOUT_LOWER)))
+
+    (* #IMPORT ./libs/dialer.trp *)
+
+    (* Send the side-effect-messages to dialers or clusters *)
+    fun send_sides log sides dialer_settings =
+        (* Add message to key-value-store, sorting by the recipients. *)
+        let fun add_msg id msg sk dict = case dict of
+            [] => [(id, [(msg, sk)])]
+            | (other_id, msgs) :: t =>
+                if id = other_id then
+                    (id, (msg, sk) :: t)
+                else (other_id, msgs) :: add_msg id msg sk t
+            (* Generate key-value-store of all message, sorting by recipients. *)
+            val (sorted_msgs, _) = case sides of
+            [] => ([], 0)
+            | x => foldl (fn ((callback, msg), (acc, seq)) =>
+                (add_msg callback msg ({ id = callback, key = (log.lastApplied, seq)}) acc, seq + 1)
+            ) ([], 1) x
+        (* Sends all messages. *)
+        in map (fn x => raft_send x dialer_settings) sorted_msgs
+    end
+
+    (* Applies all log-entries that have been committed, but not applied *)
+    fun apply_log log state_machine is_leader dialer_settings = 
+        (* If any non-applied, committed logs apply... *)
+        if log.lastApplied < log.commitIndex then
+            (* Get the latest non-applied committed entry *)
+            let val entry = get_nth_command log (log.lastApplied + 1) 
+                val command = entry.command
+                (* Update log to apply entry and apply entry on state-machine*)
+                val log = update_applied log
+                val (sides, status, step) = state_machine
+                val (new_sides, new_status, new_step) = step command
+            (* If leader is applying, execute side-effects. *)
+            in (if is_leader then
+                    entry.callback ();
+                    send_sides log new_sides dialer_settings
+                else ());
+            apply_log log (new_sides, new_status, new_step) is_leader dialer_settings end
+        else (log, state_machine)
+
+    (* #IMPORT ./libs/nodes/leader.trp *)
+    (* #IMPORT ./libs/nodes/candidate.trp *)
+    (* #IMPORT ./libs/nodes/follower.trp *)
+
+    (* A node is dormant until it has received the references of all other <nodes. *)
+    fun dormant_node node =
+        if length(node.all_nodes) < node.node_amount then
+            receive [
+                (* Adds a node to the cluster, only used for initialization *)
+                hn ("ADD_NODES", x) => 
+                    dormant_node ({node with all_nodes = append node.all_nodes x})
+            ]
+        else follower node
+    
+    (* Defines a default node, being a follower in term 1 without a leader and
+    the state-machine in its beginning state *)
+    fun default_node id all_nodes node_amount state_machine settings = 
+        let val node = {
+            all_nodes = all_nodes,
+            id = id,
+            log = empty_log,
+            term = 1,
+            voted_for = (),
+            leader = (),
+            leader_info = (),
+            state_machine = case state_machine of
+                (_, _, _) => state_machine
+                | _ => ([], WAIT, fn x => x ()),
+            snapshot_cond = settings.MAXIMUM_LOG_SIZE,
+            node_amount = node_amount,
+            serialkeys = [],
+            settings = settings
+        }
+        in dormant_node node
+    end
+
+    (* Spawn a state-machine on a seperate thread, creates a record*)
+    fun initiate_node state_machine node_amount id settings = 
+        spawn (fn () => default_node id [] node_amount state_machine settings)
+
+    (* Sends a list of all nodes to all nodes *)
+    fun add_refs nodes = 
+        map (fn x => send(x, (ADD_NODES, nodes))) nodes
+    
+    (* Spawn n nodes*)
+    fun initiate_nodes n state_machine settings =
+        let val part_init = initiate_node state_machine n
+            fun spawn_nodes n acc_id =
+                case n of
+                0 => []
+                | x => append 
+                    (spawn_nodes (x - 1) (acc_id ^ "I")) 
+                    [(part_init acc_id settings)]
+
+            val nodes = spawn_nodes n "I"
+        in 
+            add_refs nodes;
+            nodes
+    end
+
+    (* Spawn a state-machine on some alias *)
+    fun initiate_distributed_node state_machine node_amount id alias settings = 
+        spawn(alias, fn () => (default_node id [] node_amount state_machine settings))
+
+    fun initiate_distributed_nodes aliases state_machine settings =
+        let val part_init = initiate_distributed_node state_machine (length(aliases))
+            fun spawn_nodes acc acc_id =
+                case acc of 
+                [] => []
+                | h :: t =>
+                    append (spawn_nodes t (acc_id ^ "I")) [part_init acc_id h settings]
+            val nodes = spawn_nodes aliases "I"
+        in 
+            add_refs nodes;
+            nodes
+    end
+
+    val default_dialer_settings = {
+        DIALER_NOLEADER_TIMEOUT = 500,
+        DIALER_NOMSG_TIMEOUT = 2000,
+        DIALER_SM_BUSY_TIMEOUT = 1000
+    }
+
+    val default_local_settings = {
+        ELECTION_TIMEOUT_LOWER = 2000,
+        ELECTION_TIMEOUT_UPPER = 4000,
+        HEARTBEAT_INTERVAL = 500,
+        TIE_COMMITS_TO_HEARTBEAT = true,
+        MAXIMUM_LOG_SIZE = 50,
+        leader_dialer_settings = default_dialer_settings
+    }
+
+    val default_distributed_settings = {
+        ELECTION_TIMEOUT_LOWER = default_local_settings.ELECTION_TIMEOUT_LOWER,
+        ELECTION_TIMEOUT_UPPER = default_local_settings.ELECTION_TIMEOUT_UPPER,
+        HEARTBEAT_INTERVAL = default_local_settings.HEARTBEAT_INTERVAL,
+        MAXIMUM_LOG_SIZE = default_local_settings.MAXIMUM_LOG_SIZE,
+        TIE_COMMITS_TO_HEARTBEAT = false,
+        leader_dialer_settings = default_local_settings.leader_dialer_settings
+    }
+
+
+    (* Spawns a dialer, dialing into a cluster. *)
+    fun raft_dial (cluster, client_id, dialer_settings) =
+        spawn(fn () => dialer cluster client_id dialer_settings)
+    | raft_dial (cluster, client_id) = raft_dial (cluster, client_id, default_dialer_settings)
+
+    (* Spawns a distributed Raft network, which can be dialed into to
+    communicate with their state-machines *)
+    fun raft_spawn_alias (state_machine, aliases, settings) = 
+        initiate_distributed_nodes aliases state_machine settings
+    | raft_spawn_alias (state_machine, aliases) = 
+        raft_spawn_alias (state_machine, aliases, default_distributed_settings)
+
+    (* Spawns a Raft network, which can be contacted to
+    communicate with their state-machines *)
+    fun raft_spawn (state_machine, n, settings) =
+        initiate_nodes n state_machine settings
+    | raft_spawn (state_machine, n) = raft_spawn (state_machine, n, default_local_settings)
+
+in [("raft_spawn_alias", raft_spawn_alias),
+    ("raft_spawn", raft_spawn),
+    ("raft_dial", raft_dial),
+    ("default_dialer_settings", default_dialer_settings),
+    ("default_distributed_settings", default_distributed_settings),
+    ("default_local_settings", default_local_settings),
+    ("WAIT", WAIT),
+    ("SUS", SUS),
+    ("DONE", DONE),
+    ("CLIENT", CLIENT),
+    ("CLUSTER", CLUSTER),
+    ("RAFT_UPDATE", RAFT_UPDATE)
+    ]
+end

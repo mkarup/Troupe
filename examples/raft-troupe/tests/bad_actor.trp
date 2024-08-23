@@ -1,0 +1,52 @@
+let (*EXPORT START *)
+    fun bad_actor cluster nodes_amount stress_interval verbose = let 
+      val pid = self ()
+      val dialer = raft_dial (cluster, pid) 
+      val threshhold = nodes_amount / 2
+
+      fun create_nodes nodes 0 = nodes 
+      | create_nodes nodes n = create_nodes ((n, false) :: nodes) (n - 1)
+
+      val nodes = create_nodes [] nodes_amount
+
+      fun toggle_node nodes n = let 
+        val status = first (map (fn (_, s) => s) (filter (fn (node, _) => node = n) nodes) )
+        val new_nodes = (n, (not status)) :: (filter (fn (node, _) => node <> n) nodes)
+      in (
+        if status then 
+          send (dialer, (SEND_TO_NTH, n, DEBUG_CONTINUE))
+        else
+          send (dialer, (SEND_TO_NTH, n, DEBUG_PAUSE))
+        ); new_nodes
+      end
+
+      fun loop nodes = let 
+        val selected = floor ((random ()) * nodes_amount + 1)
+        val selected_status = map (fn (_, s) => s) (filter (fn (n, _) => n = selected) nodes)
+        val attempted_change = 
+            length (
+              filter (fn s => s) (
+                (not selected_status) :: (
+                  map (fn (_, s) => s) (
+                    filter (fn (n, _) => n <> selected) nodes
+                  )
+                )
+              )
+            )
+        val new_nodes = 
+          if attempted_change < threshhold then 
+            (if verbose then print "Toggling node" else ());
+            toggle_node nodes selected
+          else 
+            (if verbose then print "Tried to toggle node, but too many failures" else ());
+            nodes
+      in 
+        sleep stress_interval; 
+        loop new_nodes
+      end
+
+    in 
+      loop nodes
+    end
+    (* EXPORT END *)
+in

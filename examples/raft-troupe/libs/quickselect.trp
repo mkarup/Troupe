@@ -1,0 +1,25 @@
+import lists
+let (* EXPORT START *)
+    fun is_even i = i mod 2 = 0
+
+    (* Using QuickSelect, finds the kth element of a list. *)
+    fun quickselect list k = 
+        case list of
+        [] => "ERROR: Empty list"
+        | h :: t =>
+            let val (ys, zs) = partition (fn x => x > h) t
+                val l = length ys
+            in
+                if k < l then quickselect ys k
+                else if k > l then quickselect zs (k-l-1)
+                else h
+            end
+
+    (* Returns the median of a list. *)
+    fun median list = 
+        let val len = length list
+            val middle = if is_even len then len / 2 - 1 else (len - 1) / 2
+        in quickselect list (middle)
+    end
+    (* EXPORT END *)
+end
