@@ -8,3 +8,8 @@ elem
 length
 append
 partition
+nth
+filter
+first
+slice
+insert_at_index
