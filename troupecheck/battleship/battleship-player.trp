@@ -1,0 +1,154 @@
+import lists 
+import stdio
+let fun write x =
+    fwrite ((getStdout authority), x)
+
+    fun print_board b = 
+        write "\n";
+        foldl (fn (x,_) => foldl (fn (y,_) => write (" "^y^" ")) () x; write "\n")() b
+
+    fun make_row (f, i) = 
+        case i of 
+        0 => []
+        | _ => append (make_row (f, i-1)) [f i]
+    
+    fun bound_from_ship ship = 
+        case ship of 
+        "C" => 5
+        | "B" => 4
+        | "S" => 3 
+        | "D" => 2
+
+    fun update_board board_or_error coordinate = 
+        case getType board_or_error of 
+        "string" => board_or_error
+        | _ => 
+            let fun place_horizontal (x, y) ship_type board = 
+                    let val y_ls = nth board y
+                        val upperbound = x + (bound_from_ship ship_type)
+                        val is_valid = (x >= 1) andalso (upperbound <= 11)
+                    in if is_valid then 
+                            let val new_y = make_row ((fn i => if (i >= x) andalso (i < upperbound) then ship_type else (nth y_ls i)), 10)                                
+                                val new_board = make_row ((fn i => if i = y then new_y else (nth board i)), 10) 
+                            in new_board 
+                            end 
+                        else
+                            ("Invalid coordinates for ship of type: " ^ ship_type)
+                    end 
+
+                fun place_vertical (x, y) ship_type board = 
+                    let val upperbound = y + (bound_from_ship ship_type)
+                        val is_valid = (x >= 1) andalso (upperbound <= 11)
+                    in if is_valid then 
+                            let val new_board = make_row ((fn i => 
+                                                            if i >= y andalso i < upperbound then 
+                                                                make_row ((fn j => if j = x then ship_type else nth (nth board i) j), 10)
+                                                            else nth board i), 10)
+                            in new_board 
+                            end 
+                        else
+                            ("Invalid coordinates for ship of type: " ^ ship_type)
+                    end 
+                val ((x,y), direction, ship) = coordinate
+            in case direction of
+                "v" => place_vertical (x,y) ship board_or_error
+                | "h" => place_horizontal (x,y) ship board_or_error
+            end
+    
+    fun for_i body acc 0 = acc.0 
+    | for_i body acc to = for_i body (body acc) (to-1)
+
+    fun ship_coords_from_info info = 
+        let val (org_x, org_y) = info.0
+            val count = (bound_from_ship info.2)-1
+        in case info.1 of
+        "h" =>  
+            let val coords = for_i (fn acc => (append acc.0 [((acc.1)+1, org_y)], (acc.1)+1)) ([info.0], org_x) count
+            in coords 
+            end 
+        |"v" => 
+            let val coords = for_i (fn acc => (append acc.0 [(org_x, (acc.1)+1)], (acc.1)+1)) ([info.0], org_y) count
+            in coords 
+            end 
+        end
+             
+
+    fun make_board ls = 
+        let val start_board = make_row ((fn _ => make_row ((fn _ => "-"), 10)), 10)
+            val (board, ships) = foldl (fn (x,(board_acc, ships_acc)) => (update_board board_acc x, append ships_acc [ship_coords_from_info x])) (start_board, []) ls 
+        in (board, ships)
+        end
+    
+    
+    val c1 = ((3,2), "h", "C")
+    val c2 = ((2,3), "v", "S")
+    val c3 = ((8,9), "h", "D")
+    val c4 = ((3,5), "v", "B")
+    val c5 = ((8,3), "h", "D")
+         
+    fun player() =
+        receive [hn ("STARTING", player_num) => 
+                    let val _ = write "\nBoth players have joined. Player 1 starts.\n"
+                        val _ = write ("\nYou are player " ^ (toString player_num) ^ ".\n")
+                    in player()
+                    end,
+
+                hn ("YOURTURN", senderid) => 
+                    let val _ = write "\nPlease pick x-coordinate of attack: \n>"
+                        val x_attack = inputLineAtLevel authority `{}` 
+                        val _ = write "\nPlease pick y-coordinate of attack: \n>"
+                        val y_attack = inputLineAtLevel authority `{}`
+                        val (x, y) = (stringToInt(x_attack), stringToInt(y_attack))
+                        val _ = send(senderid, (("ATTACK", (x,y)), self()))
+                    in player()
+                    end, 
+
+                hn (("ATTACK_RESP", msg), senderid) =>
+                    case msg of 
+                    "Illegal coordinate" => 
+                        let val _ = write ("\nIllegal attack coordinate! Try with another coordinate...\n")
+                        in player()
+                        end
+                    |_ => 
+                        let val _ = write ("\nYour move was a " ^ msg ^ "!")
+                            val _ = write ("\nWaiting for opponent to attack...\n")
+                        in player ()
+                        end,
+                
+                hn ("UPDATE_MSG", coords, msg, new_board) => 
+                    let val _ = write ("\nOpponent attacked (" ^ (toString coords.0) ^ ", " ^ (toString coords.1) ^").")
+                    in case msg of 
+                    "Illegal coordinate" => 
+                        let val _ = write ("\nThis is an illegal attack coordinate! Wait for opponent to try again...\n")
+                        in player()
+                        end
+                    |_ => 
+                        let val _ = print_board new_board
+                            val _ = write ("\nThis move was a " ^ msg ^ "!")
+                            val _ = write ("\nIt is now your turn.\n")
+                        in player()
+                        end
+                    end,
+                
+                hn "YOUWON" => 
+                    let val _ = write ("\nCongratulations! You sank all the opponent's ships. You are the Winner!\n")
+                    in exit (authority, 0)
+                    end,
+                
+                hn ("YOULOST", new_board, coords) => 
+                    let val _ = write ("\nOpponent attacked (" ^ (toString coords.0) ^ ", " ^ (toString coords.1) ^").")
+                        val _ = print_board new_board
+                        val _ = write ("\nToo bad! The opponent sank all your ships. You lost...\n")
+                    in exit (authority, 0)
+                    end
+                ]
+
+    fun join() = 
+        let val (board, ships) = make_board [c1,c2,c3,c4, c5] 
+            val game = whereis ("@battleship-game", "battleship")
+            val _ = send(game, ("JOINING", board, ships, self()))
+        in player() 
+        end
+
+in join() 
+end

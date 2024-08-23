@@ -1,0 +1,45 @@
+import lists
+(* This file times how long it takes takes troupe to cons an element in front of a list. *)
+let fun sum [] acc = acc 
+    | sum (x::xs) acc =
+        sum xs (acc+x)
+
+    fun average ls = 
+        let val len = length ls 
+            val sum_ls = sum ls 0 
+        in (sum_ls/len)
+        end
+
+    fun float_gen (low, high) tco size = 
+        let val x = random()
+
+            val bool_int = random ()
+            
+            val bool = bool_int < (1/2) 
+
+            val lInf = low = 1/0 (* check for inf *)
+            val hInf = high = 1/0
+
+            val res = 
+                case (lInf, hInf) of 
+                    (true, true) => if bool then x * size else -x * size
+                    | (true, false) => high - (x * size) 
+                    | (false, true) => low + (x * size)
+                    | (false, false) => low + (x * (high-low)) 
+        in res
+        end
+
+    val inf = 1/0
+
+    fun test_float(timings, 0) = timings
+    | test_float(timings, n) = 
+    let val startT = getTime()
+        val _ = float_gen(inf, inf) () n
+        val endT = getTime()
+        val elapsedMilliseconds = endT - startT
+        val newTimings = append timings [elapsedMilliseconds]
+        val newN = (n-1)
+    in test_float(newTimings, newN)
+    end
+in average (test_float([], 100))
+end

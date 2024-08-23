@@ -25,6 +25,7 @@ libs:
 	$(COMPILER) ./lib/raft_debug.trp -l
 	$(COMPILER) ./lib/bst.trp -l	
 	$(COMPILER) ./lib/localregistry.trp -l	
+	$(COMPILER) ./lib/troupecheck.trp -l	
 
 test:
 	mkdir -p out

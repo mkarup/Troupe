@@ -1,0 +1,8 @@
+import lists
+let val ls = ["ls", 3, 1/2, {r = 10, p = 7}]
+    val string = nth ls 1
+    val int = nth ls 2
+    val float = nth ls 3
+    val record = nth ls 4 
+in (getType string = "string") andalso (getType int = "number") andalso (getType float = "number") andalso (getType record = "record")
+end

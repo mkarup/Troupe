@@ -1,0 +1,41 @@
+import lists
+(* This file times how long it takes takes troupe to send and receive elements between processes. 
+    Average time ~0.10 milliseconds *)
+let fun sum [] acc = acc 
+    | sum (x::xs) acc =
+        sum xs (acc+x)
+
+    fun average ls = 
+        let val len = length ls 
+            val sum_ls = sum ls 0 
+        in (sum_ls/len)
+        end
+
+    fun rec_rng ls =
+        receive [hn ("REQUEST_RND", senderid) =>
+                    let val rnd = random()
+                        val _ = send (senderid, rnd) 
+                        in rec_rng (rnd :: ls)
+                        end] 
+    val recorder = spawn(fn() => rec_rng [])
+
+    fun test () = 
+        let val _ = send(recorder, ("REQUEST_RND", self()))
+            val x = receive [hn x => x]
+        in x
+        end
+
+    fun test_cons(timings, 0) = timings
+    | test_cons(timings, n) = 
+    let val startT = getTime()
+        val res = test()
+        val endT = getTime()
+        val elapsedMilliseconds = endT - startT
+        val newTimings = append timings [elapsedMilliseconds]
+        val newN = (n-1)
+    in test_cons(newTimings, newN)
+    end
+in 
+    print (average (test_cons([], 1000)));
+    exit(authority, 0)
+end

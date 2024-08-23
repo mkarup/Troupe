@@ -1,0 +1,627 @@
+import lists
+
+(*
+-------------------------------- 
+INIT FUNCTION
+
+To be called when  starting out testing
+
+--------------------------------
+*)
+let fun init_tc auth rng =  
+        receive [hn ("REQUEST_RNG", senderid) => 
+                    let val _ = send (senderid, rng) 
+                    in init_tc auth rng end,
+
+                hn ("REQUEST_AUTH", senderid) => 
+                    let val _ = send (senderid, auth) 
+                    in init_tc auth rng end,
+
+                hn ("UPDATE_RNG", senderid, new_rng) => 
+                    let val _ = send(senderid, "done") in
+                    init_tc auth new_rng end]
+
+(* 
+--------------------------------
+PRINTING TO CONSOLE
+
+Simple functions for more convenient printing to console.
+
+-------------------------------- 
+*)  
+    fun write x auth =
+        fwrite ((getStdout auth), x)
+
+    fun args_toString args = 
+        let fun aux_toString acc (x0::x1::xs) = aux_toString (acc ^ (toString x0) ^ ", ") (x1::xs)
+            | aux_toString acc (x::xs) = acc ^ (toString x) in 
+        aux_toString "" args end
+
+(* 
+--------------------------------
+ERROR HANDLING
+
+Handles the printing of appropriate error messages for errors that may occur in the use of TroupeCheck.
+
+-------------------------------- 
+*)
+    fun report_error error_reason tco = 
+        let val _ = send (tco, ("REQUEST_AUTH", self()))
+            val auth = receive [hn x => x]
+            val err_string = case error_reason of 
+             ("cant_satisfy", tries) => "No valid test could be generated after " ^ (toString tries) ^ " tries.\n"
+            | ("non_boolean_result", _) => "The property or precondition code returned a non-boolean result.\n"
+            | ("type_mismatch", _) => "The types' structure doesn't match the property.\n"
+            | ("record_mismatch", _) => "the number of names provided for record generation, does not match the number of types provided.\n"
+        in
+        write "\u001B[31m \nError: " auth; (* Changing the print color to red *)
+        write (err_string ^ "\u001B[0m") auth; (* Changing the color back *)
+        exit (auth, 0) end
+    
+    fun boolean_check x tco = 
+        if (getType x)<>"boolean" then report_error ("non_boolean_result", 0) tco else ()
+
+    fun function_not_done_check p tco = 
+        if (getType p)<>"function" then report_error ("type_mismatch", 0) tco else ()
+(*
+--------------------------------
+UTILS
+
+Different utility functions that are used across the library.
+
+-------------------------------- 
+*)  
+    fun remove_nth n [] i = []
+    | remove_nth n (x::xs) i = 
+        if n = i then xs
+        else x :: (remove_nth n xs (i + 1))
+
+    fun make_list (f, i) = 
+        case i of 
+        0 => []
+        | _ => append [f()] (make_list (f, i-1))
+    
+
+(* TODO: handle when arguments are passed to a property that does not take arguments *)
+    fun apply_args p l tco =
+        let val _ = send (tco, ("REQUEST_AUTH", self()))
+            val auth = receive [hn x => x]
+        in case l of 
+            [] =>  (* this case is only reached if there are no generators to begin with *)
+                let val _ = boolean_check (p()) tco
+                    val res = p() 
+                    val _ = blockdecl auth 
+                in declassify (res, auth, `{}`) 
+                end
+            | (x::xs) => 
+                let val res = foldl (fn (x,y) => function_not_done_check y tco; y x) p l
+                    val _ = boolean_check res tco
+                    val _ = blockdecl auth
+                in declassify (res, auth, `{}`)
+            end
+        end
+
+    fun report_fail_reason rec noOfTests tco =
+        let val _ = send (tco, ("REQUEST_AUTH", self()))
+            val auth = receive [hn x => x] in
+        case rec.failReason of
+            "false_prop" => 
+                write "\nFailure at input: " auth;
+                write (args_toString rec.ctx) auth;
+                write ("\nAfter running: " ^ (toString (noOfTests - rec.remTests + 1)) ^ " test(s)\n") auth
+        end
+    
+    fun build_record names vals = 
+        let fun aux r [] [] = r 
+            | aux r (n::ns) (v::vs) = 
+                aux (recordExtend(r, n, v)) ns vs in
+        aux {} names vals 
+        end
+    
+    (* Hardcoded until a tuple from list function is implemented in Troupe - an issue has been raised on GH.*)
+    fun build_tuple ls = 
+                case ls of 
+                [] => (0)
+                |[x] => (x) 
+                |[x1,x2] => (x1,x2)
+                |[x1,x2,x3] => (x1,x2,x3)
+                |[x1,x2,x3,x4] => (x1,x2,x3,x4)
+                |[x1,x2,x3,x4,x5] => (x1,x2,x3,x4,x5)
+                |[x1,x2,x3,x4,x5,x6] => (x1,x2,x3,x4,x5,x6)
+                |[x1,x2,x3,x4,x5,x6,x7] => (x1,x2,x3,x4,x5,x6,x7)
+                |[x1,x2,x3,x4,x5,x6,x7,x8] => (x1,x2,x3,x4,x5,x6,x7,x8)
+                |[x1,x2,x3,x4,x5,x6,x7,x8,x9] => (x1,x2,x3,x4,x5,x6,x7,x8,x9)
+                |[x1,x2,x3,x4,x5,x6,x7,x8,x9,x10] => (x1,x2,x3,x4,x5,x6,x7,x8,x9,x10)
+                |_ => (2, 3, 4, 5) 
+    
+        fun dec_nth list idx = 
+            let fun dec_nth_aux [] acc i = acc 
+                | dec_nth_aux (x::xs) acc i =
+                    case i = idx of 
+                    true =>
+                        let val dec_val = if x <= 1/10000 then 0 else x/(3/2) in
+                        append (append acc [dec_val]) xs end
+                    | false => dec_nth_aux xs (append acc [x]) (i+1)
+        in  
+            dec_nth_aux list [] 0 end
+        
+    fun zero_nth list idx = 
+            let fun zero_nth_aux [] acc i = acc 
+                | zero_nth_aux (x::xs) acc i =
+                    case i = idx of 
+                    true =>
+                        append (append acc [0]) xs
+                    | false => zero_nth_aux xs (append acc [x]) (i+1)
+        in  
+            zero_nth_aux list [] 0 end
+    
+    fun dec_all seq = 
+        let fun dec_all_aux [] i = [] 
+            | dec_all_aux (x::xs) i = 
+                if x = 0 then
+                    dec_all_aux xs (i+1)
+                else 
+                    [(fn () =>  (zero_nth seq i)), (fn() => [fn () =>  (dec_nth seq i), fn () => dec_all_aux xs (i+1)])] in 
+        dec_all_aux seq 0 end
+    
+    fun seqs_of_seq sequence lengths = 
+        let fun aux seq acc 0 = (acc, seq) 
+            | aux (x::xs) acc n = 
+                aux xs (append acc [x]) (n-1) 
+            val (res, _) = (foldl (fn (x,(acc, s)) => 
+                                let val (curr_acc, curr_seq) = aux s [] x in 
+                                (append acc [curr_acc], curr_seq) end)([], sequence) lengths)
+        in res 
+        end
+
+    fun cutoff_at list idx = 
+        let fun aux ls acc 0 = acc
+            | aux (x::xs) acc i = 
+                aux xs (append acc [x]) (i-1) in 
+        aux list [] idx end 
+    
+    fun for_i f y 0 = y
+      | for_i f y i = for_i f (f (i,y)) (i-1)
+(* 
+--------------------------------
+SHRINKING
+
+Works by first using random shrinking when a failing example has been found (shrink & random_shrink_aux). 
+Random shrinking means simply generating new test cases with gradually smaller size, to find a case smaller than the original one. This rarely produces a minmal result.
+The smallest randomly shrunk instance is then further shrunk using internal shrinking. (internal_shrink & internal_shrink_aux)
+Internal shrinking means keeping track of all random decision made during generation, and then re-generating with smaller "random" decisions.
+
+This part of the code also contains the functionality for recording all random decisions, and replaying these random decisions (rec_rng & rep_rng).
+All of these functions are spawned and then requests or updates may be send to them, so that the correct RNG's are used at different points in the code.
+
+-------------------------------- 
+*)  
+    fun rec_rng ls =
+        receive [hn ("REQUEST_RND", senderid) =>
+                    let val rnd = random()
+                        val _ = send (senderid, rnd) 
+                        in rec_rng (rnd :: ls)
+                        end, 
+                hn ("REQUEST_SEQ", senderid) => 
+                    let val _ = send (senderid, (reverse ls))
+                    in rec_rng []
+                    end]
+    
+    fun rep_rng ls = 
+        receive [hn ("REQUEST_RND", senderid) => 
+                    case ls of 
+                    (x::xs) => 
+                        let val _ = send (senderid, x) 
+                        in rep_rng xs
+                        end 
+                    | [] => 
+                        let val _ = send (senderid, 0)
+                        in rep_rng ls 
+                        end, 
+                hn ("REQUEST_LEFT", senderid) => 
+                    let val _ = send (senderid, ls)
+                    in rep_rng [] 
+                    end, 
+                hn ("UPDATE_LS", new_ls) => 
+                    rep_rng new_ls]
+    
+    fun shrink_sized_sequence seqs gens prop pre size left_over_len idx_of_sized tco = 
+        let val _ = send(tco, ("REQUEST_RNG", self())) 
+            val pid = receive [hn x => x]
+            val _ = send(tco, ("REQUEST_AUTH", self())) 
+            val auth = receive [hn x => x]
+            val cap = ceil (((length (nth seqs (idx_of_sized+1)))-2)/left_over_len )(* number of to remove parts of the sequence *)
+            val size_ls = for_i (fn (x,y) => append y [x]) [] (left_over_len-1)
+            fun aux i = 
+                let val to_remove = foldl (fn (x,y) => append y [(i*left_over_len)-x])[i*left_over_len] size_ls
+                        val new_seq = foldl (fn (x,y) => remove_nth x y 0) (nth seqs (idx_of_sized+1)) to_remove
+                        val new_seqs = mapi (fn (i, x) => if i = idx_of_sized then new_seq else x) seqs
+                        val new_args = mapi (fn (i, x) =>
+                                        let val _ = send (pid, ("UPDATE_LS", (nth new_seqs (i+1))))
+                                            val arg = x tco size
+                                        in arg
+                                        end) gens
+                in case i = (cap) of 
+                true => 
+                    (new_seqs, new_args)
+                | false => 
+                    let val precond_is_met = if (pre <> ()) then (apply_args pre new_args tco) else true 
+                    in case (apply_args prop new_args tco) orelse (precond_is_met = false) of 
+                        true => aux (i+1)
+                        | false => (new_seqs, new_args) 
+                    end 
+                end 
+        in aux 1
+        end
+
+
+
+    fun internal_shrink_aux seqs gens lengths prop pre size counter tco = 
+        let val _ = send(tco, ("REQUEST_RNG", self())) 
+            val pid = receive [hn x => x]
+            val _ = send(tco, ("REQUEST_AUTH", self())) 
+            val auth = receive [hn x => x]
+        in case seqs of 
+        (x1::x2::x3::xs) => 
+            let val seqs_of_curr = seqs_of_seq (x2()) lengths
+                val args_and_leftovers = mapi (fn (i, x) =>
+                                        let val _ = send (pid, ("UPDATE_LS", (nth seqs_of_curr (i+1))))
+                                            val arg = x tco size
+                                            val _ = send (pid, ("REQUEST_LEFT", self()))
+                                            val left_overs = receive [hn x => x] 
+                                        in {arg = arg, left_overs = left_overs}
+                                        end) gens
+                val (test_args, left_over_seqs) = foldl (fn (x, (raws, left_overs)) => (append raws [x.arg], append left_overs [x.left_overs])) ([],[]) args_and_leftovers
+                (* val ret_seqs = mapi (fn (i,x) => 
+                                        if (length x) = 0 then (nth seqs_of_curr (i+1)) 
+                                        else cutoff_at (nth seqs_of_curr (i+1)) ((nth lengths (i+1))-(length x))) left_over_seqs *)
+                val (is_sized_sequence, idx_of_sized, left_over_size, _) = foldl (fn (x,(bool, idx, len, count)) => if (length x > 0) 
+                                                                            then (true, count, (length x), (count+1))
+                                                                            else (bool, idx, len, (count+1))) (false, -1, 0, 0) left_over_seqs
+                
+                val (ret_seqs, args) = if is_sized_sequence 
+                                then shrink_sized_sequence seqs_of_curr gens prop pre size left_over_size idx_of_sized tco
+                                else (seqs_of_curr, test_args)
+                val precond_is_met = if (pre <> ()) then (apply_args pre args tco) else true 
+            in    
+                case (apply_args prop args tco) orelse (precond_is_met = false) of 
+                    true => internal_shrink_aux (x1::x3()) gens lengths prop pre size counter tco
+                    | false => internal_shrink ret_seqs gens prop pre size (counter+1) tco 
+            end 
+        | (x::xs) => 
+            let val seqs_of_curr = seqs_of_seq (x()) lengths
+                val test_args = mapi (fn (i, y) => 
+                                        let val _ = send (pid, ("UPDATE_LS", (nth seqs_of_curr (i+1))))
+                                            val arg = y tco size 
+                                            in arg end) gens
+                val precond_is_met = if (pre <> ()) then (apply_args pre test_args tco) else true
+            in  
+                case (apply_args prop test_args tco) orelse (precond_is_met = false) orelse (size < 0) of 
+                    true => 
+                        let val res = mapi (fn (i, y) => 
+                                        let val _ = send (pid, ("UPDATE_LS", (nth seqs_of_curr (i+1))))
+                                            val arg = y tco (size+1) 
+                                            in arg end) gens in 
+                        {shrunk_ctx = res, count = counter} end
+                    | false => internal_shrink_aux [x] gens lengths prop pre (size-1) counter tco
+                
+            end 
+        end
+
+    and internal_shrink sequences gens prop pre size counter tco = 
+        let val (seqs_comb, seq_lengths) = foldl (fn (x, (seq, lengths)) => ((append seq x), (append lengths [(length x)]))) ([], []) sequences
+        in
+            if foldl (fn (x,y) => (x = 0) andalso y) true seqs_comb then 
+                internal_shrink_aux [fn () => seqs_comb] gens seq_lengths prop pre size counter tco
+            else  
+                let val decreased_seqs = dec_all seqs_comb
+                    val dec_seqs_w_root = append [fn() => seqs_comb] decreased_seqs
+                    val res = internal_shrink_aux dec_seqs_w_root gens seq_lengths prop pre size (counter) tco
+                in 
+                res end
+        end
+    
+    fun random_shrink_aux sequences generators prop pre success size counter divi tco =
+        if (counter = 100) orelse (size = 0) then {count = success, size = size, sequences = sequences} else
+        let val _ = send(tco, ("REQUEST_RNG", self()))
+            val pid = receive [hn x => x]
+            val new_size = floor (size/divi)
+            val (shrunk_args, shrunk_sequences) = 
+                                        foldl (fn (x, (arg_acc, seq_acc)) => 
+                                                let val arg = x tco new_size
+                                                    val _ = send (pid, ("REQUEST_SEQ", self()))
+                                                    val seq = receive [hn x => x]
+                                                in (append arg_acc [arg], append seq_acc [seq]) 
+                                                end) ([],[]) generators
+            val precond_is_met = if (pre <> ()) then (apply_args pre shrunk_args tco) else true 
+        in
+            case (apply_args prop shrunk_args tco) orelse (precond_is_met = false) of
+                true => random_shrink_aux sequences generators prop pre success size (counter+1) (divi+2) tco
+                | false =>
+                    random_shrink_aux shrunk_sequences generators prop pre (success+1) new_size (0) 2 tco
+        end
+
+    fun shrink sequence generators prop pre size counter tco = 
+        let val rng_recorder = spawn (fn() => rec_rng [])
+            val _ = send (tco, ("UPDATE_RNG", self(), rng_recorder))
+            val _ = receive [hn x => ()]
+            val res = random_shrink_aux sequence generators prop pre 0 size counter 2 tco
+            val rng_replayer = spawn (fn() => rep_rng [])
+            val _ = send (tco, ("UPDATE_RNG", self(), rng_replayer))
+            val _ = receive [hn x => ()]
+            val res = internal_shrink (res.sequences) generators prop pre res.size (res.count) tco
+        in 
+            res
+        end 
+(*
+--------------------------------
+GENERATORS
+
+Contains generators for Troupe's built-in types. All generators must return a single instance of the type they generate, 
+and take a 'size' argument as the very last argument.
+This size will be given to all generators in the generation of test cases (and shrinking).
+Generators that take more arguments, will need to have these passed along to them before passing the generator to the testing facilities
+(convenience functions for this are supplied later). 
+
+It is recommended that all user defined generators only make use of pre-defined generators or their matching convenience functions
+for random decisions (i.e. a call to float_gen/float() or int_gen/integer()), instead of having to send and receive the correct messages to the RNG threads.
+However, it can be done if the users wishes to and understands what is going on.
+
+-------------------------------- 
+*)   
+    
+    fun float_gen (low, high) tco size = 
+        let val _ = send (tco, ("REQUEST_RNG", self()))
+            val pid = receive [hn x => x]
+            
+            val _ = send (pid, ("REQUEST_RND", self()))
+            val x = receive [hn x => x]
+
+            val _ = send (pid, ("REQUEST_RND", self()))
+            val bool_int = receive [hn x => x]
+            
+            val bool = bool_int < (1/2) 
+
+            val lInf = low = 1/0 (* check for inf *)
+            val hInf = high = 1/0
+
+            val res = 
+                case (lInf, hInf) of 
+                    (true, true) => if bool then x * size else -x * size
+                    | (true, false) => high - (x * size) 
+                    | (false, true) => low + (x * size)
+                    | (false, false) => low + (x * (high-low)) 
+        in res
+        end
+    
+    fun int_gen (low, high) tco size = 
+        let val res = floor (float_gen (low, high+1) tco size)
+        in res
+        end
+    
+    fun one_of ls tco size = 
+        let val idx = (int_gen (1, (length ls)) tco size)
+        in (nth ls idx)   
+        end  
+
+    fun bool_gen tco size = 
+        let val rnd = int_gen (0,1) tco size
+            val res = if rnd = 0 then false
+                      else true 
+        in res
+        end
+
+    (* NOTE: Generates only letters (upper and lower case) and numbers. *)
+    fun char_gen tco size =
+        let val chars = 
+            ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
+            "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+            "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
+            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] (* length: 62 *)
+            val x = (int_gen (1, (62-1)) tco size)
+        in nth chars x 
+        end
+
+    fun label_gen tco size =
+        newlabel() 
+    
+    (* ts: list of generators - used to generate values for fields *)
+    (* NOTE: Hardcoded for tuple of up to 10 elements  - see build_tuple in 'UTILS' *)
+    fun tuple_gen ts tco size = 
+        let val ts_vals = map (fn x => x tco size) ts
+        in build_tuple ts_vals
+        end
+
+    (* ns: list of strings - will be used as fieldnames *)
+    (* ts: list of generators - used to generate values for fields *)    
+    fun rec_gen ns ts tco size = 
+        if (length ns) <> (length ts) then 
+            report_error ("record_mismatch", 0) tco
+        else  
+            let val ts_vals = map (fn x => x tco size) ts
+                val res = build_record ns ts_vals 
+            in res
+            end 
+    
+    fun labeled_value_gen labels value_gen tco size = 
+        let val inst = value_gen tco size 
+            val lab = one_of labels tco size 
+        in inst raisedTo lab
+        end
+    
+    fun combined_labeled_gen labels gen tco size = 
+        let val labels_to_use = foldl(fn (x,y) => if (bool_gen tco size) then append y [x] else y)[`{}`] labels
+            val value = gen tco size 
+            val res = foldl (fn (x,y) => y raisedTo x) value labels_to_use 
+        in res 
+        end 
+    
+    (* NOTE: Generates only strings of letters (upper and lower case) and numbers. *)
+    fun string_gen tco size = 
+        let val len = (int_gen (0, size) tco size)
+            fun string_aux acc 0 = acc 
+            | string_aux acc i = string_aux ((char_gen tco size) ^ acc) (i-1) 
+            val string = (string_aux "" len)
+        in string
+        end
+
+    fun list_gen (generator) tco size = 
+        let val len = (int_gen (0, size) tco size)
+            val res = make_list ((fn () => generator tco size), len) 
+        in res
+        end
+        
+(* 
+--------------------------------
+CORE FUNCTIONALITY
+
+Handles preparing the recorder RNG, running the tests, calling the shrinker, and reporting the results to the user.
+
+-------------------------------- 
+*)              
+    fun core_forall (generators, prop, 0, size, pre, cap, tco) = {failReason = (), ctx = (), ctx_seq = (), remTests = 0, size = size}
+        |core_forall (generators, prop, i, size, pre, cap, tco) =  
+            let val _ = send(tco, ("REQUEST_RNG", self()))
+                val pid = receive [hn x => x]
+                val _ = send(tco, ("REQUEST_AUTH", self()))
+                val auth = receive [hn x => x]
+                val (args, sequences) = foldl (fn (x, (arg_acc, seq_acc)) => 
+                                                let val arg = x tco size
+                                                    val _ = send (pid, ("REQUEST_SEQ", self()))
+                                                    val seq = receive [hn x => x]
+                                                in (append arg_acc [arg], append seq_acc [seq]) 
+                                                end) ([],[])generators
+            in
+                case pre of 
+                    () =>
+                        if (apply_args prop args tco) then 
+                            let val _ = write "." auth 
+                            in core_forall (generators, prop, i-1, size+1, pre, cap, tco)
+                            end
+                        else 
+                            let val _ = write "!" auth
+                            in {failReason = "false_prop", ctx = args, ctx_seq = sequences, remTests = i, size = size} 
+                            end
+                    | _ => 
+                        if (apply_args pre args tco) then 
+                            if (apply_args prop args tco) then (write "." auth; core_forall (generators, prop, i-1, size+1, pre, cap, tco))
+                            else 
+                                let val _ = write "!" auth
+                                in {failReason = "false_prop", ctx = args, ctx_seq = sequences, remTests = i, size = size} 
+                                end
+                        else 
+                        let val _ = write "x" auth
+                        in if (size = cap) andalso (i*5 = cap) then report_error ("cant_satisfy", size) tco
+                            else if size = cap then {failReason = (), ctx = (), ctx_seq = (), remTests = i, size = size}
+                            else core_forall (generators, prop, i, size+1, pre, cap, tco) 
+                        end
+            end
+
+    fun run_tests (generators, p, to_shrink, noOfTests) auth = 
+        let val (prop, pre) = 
+                case p of    
+                    (x,y) => (x,y)
+                    | x => (x, ())
+            val rng_recorder = spawn (fn() => rec_rng [])
+            val tco = spawn (fn() => init_tc auth rng_recorder)
+            val res = core_forall (generators, prop, noOfTests, 0, pre, (noOfTests*5), tco) in 
+            case res.failReason of
+                () => write ("\u001B[1m \u001B[32m \nSuccess: \u001B[0mPassed all " ^ (toString noOfTests) ^ " test(s).\n") auth; true
+                |_ => 
+                    report_fail_reason res noOfTests tco; 
+                    if to_shrink then 
+                        (write ("\u001B[1m\u001B[34mShrinking\u001B[0m:") auth;
+                        let val shrink_res = shrink res.ctx_seq generators prop pre res.size 0 tco in
+                        write "\nFailing test case was shrunk to:\n" auth;
+                        write (args_toString shrink_res.shrunk_ctx) auth;
+                        write ("\nAfter " ^ (toString shrink_res.count) ^ " iterations.\n") auth;
+                        false
+                        end)
+                    else 
+                        false
+        end
+
+    fun for_all (generators, p) auth = run_tests (generators, p, true, 100) auth 
+    | for_all (generators, p, noOfTests) auth = run_tests (generators, p, true, noOfTests) auth 
+
+    fun for_all_noshrink (generators, p) auth = run_tests (generators, p, false, 100) auth 
+    | for_all_noshrink (generators, p, noOfTests) auth = run_tests (generators, p, false, noOfTests) auth 
+
+    fun troupecheck props auth = 
+        let val n = toString (length props)
+            fun troupecheck_aux [] i = exit(auth, 0)
+            | troupecheck_aux (x::xs) i =
+                let val _ = write ("\nRunning test " ^ (toString i) ^ " of " ^ n ^ ":\n") auth
+                    val res = x() auth
+                in troupecheck_aux xs (i+1) end
+        in troupecheck_aux props 1 
+        end
+
+(* 
+--------------------------------
+CONVENIENCE FUNCTIONS 
+
+These are functions that make it easier for the user to make use of the different generators, and define their own generators.
+
+-------------------------------- 
+*)
+    val inf = 1 / 0
+    fun integer () = int_gen(inf, inf)
+        | integer (l, h) = int_gen(l, h)
+    
+    fun pos_integer () = integer(0, inf)
+
+    fun neg_integer () = integer(inf, -1)
+
+    fun float () = float_gen(inf, inf)
+        | float (h, l) = float_gen(h, l)
+
+    fun pos_float () = float(0, inf)
+
+    fun neg_float () = float(inf, 0)
+
+    fun boolean () = bool_gen
+
+    fun list (type) = list_gen (type)
+
+    fun string () = string_gen
+
+    fun char () = char_gen
+
+
+    fun tuple (ts) = tuple_gen ts
+    
+    fun labeled_value (ls, gen) = labeled_value_gen ls gen 
+
+    fun combined_labeled_value (ls, gen) = combined_labeled_gen ls gen
+
+    fun label() = label_gen
+
+    fun record (ns, ts) = rec_gen ns ts
+in 
+    [ ("make_list", make_list)
+    , ("build_record", build_record)
+    , ("build_tuple", build_tuple)
+    , ("one_of", one_of)
+    , ("for_all", for_all)
+    , ("for_all_noshrink", for_all_noshrink)
+    , ("troupecheck", troupecheck)
+    , ("inf", inf)
+    , ("integer", integer)
+    , ("pos_integer", pos_integer)
+    , ("neg_integer", neg_integer)
+    , ("float", float)
+    , ("pos_float", pos_float)
+    , ("neg_float", neg_float)
+    , ("boolean", boolean)
+    , ("list", list)
+    , ("string", string)
+    , ("char", char)
+    , ("tuple", tuple)
+    , ("labeled_value", labeled_value)
+    , ("combined_labeled_value", combined_labeled_value)
+    , ("label", label)
+    , ("record", record)
+    ]
+end

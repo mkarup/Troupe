@@ -1,0 +1,179 @@
+import troupecheck
+import lists
+(*
+--------------------------------
+CUSTOM TYPE PROGRAM
+
+Used for testing the creation of complex custom generators.
+Here we defined an interpreter and generator for simple programs consisting of: 
+expr := ("num", number) |("var", string) |("add", expr, expr) |("sub", expr, expr) |("mul", expr, expr) |("div", expr, expr) 
+stmt := ("assign", string, expr) |("print", expr)
+prog := [[stmt], expr]
+
+-------------------------------- 
+*)
+let fun eval exp env =
+    case exp of
+      ("num", n) => n
+    | ("var", n) => lookup env n ("unknown variable " ^ n)
+    | ("add", e1, e2) => (eval e1 env) + (eval e2 env)
+    | ("sub", e1, e2) => (eval e1 env) - (eval e2 env)
+    | ("mul", e1, e2) => (eval e1 env) * (eval e2 env)
+    | ("div", e1, e2) => (eval e1 env) / (eval e2 env)
+    | _ => print ("Error: ill defined expression"); exit (authority, 1)
+
+    fun execute stmt env =
+        case stmt of
+        ("assign", var, exp) =>
+            let val value = eval exp env
+            in
+                append [(var, value)] env
+            end
+        | ("print", exp) => (()(* print ("from prog: " ^ (toString (eval exp env)) *); env)
+
+    fun remove_nth n [] i = []
+    | remove_nth n (x::xs) i = 
+        if n = i then xs
+        else x :: (remove_nth n xs (i + 1))
+    
+    fun interpret prog =
+        let fun interpretHelper [] env = env
+            | interpretHelper (stmt :: rest) env =
+                let val newEnv = execute stmt env
+                in
+                    interpretHelper rest newEnv
+                end
+            val (stmts, exp) = prog
+            val last_env = (interpretHelper stmts [])
+        in
+            eval exp last_env
+        end
+    
+    fun optimize_prog prog =
+        let val (stmts, exp) = prog
+            fun optimize_exp exp =
+                case exp of
+                ("num", n) => ("num", n)
+                | ("var", x) => ("var", x)
+                | ("add", e1, e2) => 
+                    (case e1 of 
+                    ("num", n1) => (case e2 of 
+                                    ("num", n2) => ("num", (n1+n2))
+                                    |_ => ("add", (optimize_exp e1), (optimize_exp e2)))
+                    | _ => ("add", (optimize_exp e1), (optimize_exp e2)))
+                | ("sub", e1, e2) => 
+                    (case e1 of 
+                    ("num", n1) => (case e2 of 
+                                    ("num", n2) => ("num", (n1-n2))
+                                    |_ => ("sub", (optimize_exp e1), (optimize_exp e2)) )
+                    |_ => ("sub", (optimize_exp e1), (optimize_exp e2)))
+                | ("mul", e1, e2) => 
+                    (case e1 of 
+                    ("num", n1) => (case e2 of 
+                                    ("num", n2) => ("num", (n1*n2))
+                                    |_ => ("mul", (optimize_exp e1), (optimize_exp e2)) )
+                    |_ => ("mul", (optimize_exp e1), (optimize_exp e2)))
+                | ("div", e1, e2) => 
+                    (case e1 of 
+                    ("num", n1) => (case e2 of 
+                                    ("num", n2) => if ((n1 = 0) andalso (n2 = 0)) then ("div", e1, e2) else ("num", (n1/n2))
+                                    |_ => ("div", (optimize_exp e1), (optimize_exp e2)) )
+                    |_ => ("div", (optimize_exp e1), (optimize_exp e2)))
+
+            fun optimize_stmt stmt =
+                case stmt of
+                ("assign", var, exp) => ("assign", var, (optimize_exp exp))
+                | ("print", exp) => ("print", (optimize_exp exp))
+        in
+            ((map optimize_stmt stmts), optimize_exp exp)
+        end 
+
+    fun exp_gen ls nesting_level tco size = 
+        let val exp_ts = 
+            if nesting_level = 2 then ["num"] 
+            else (if length ls = 0 then ["num", "add", "sub", "mul", "div"] 
+            else ["var", "num", "add", "sub", "mul", "div"])
+            val exp_type = one_of exp_ts tco size
+        in 
+            case exp_type of 
+            "num" => 
+                let val value = integer(1, inf) tco size in
+                ("num", value) end
+            | "var" => 
+                let val value = one_of ls tco size in
+                ("var", value) end 
+            |"add" => 
+                let val e1 = exp_gen ls (nesting_level+1) tco size 
+                    val e2 = exp_gen ls (nesting_level+1) tco size
+                in
+                    ("add", e1, e2)
+                end
+            |"sub" => 
+                let val e1 = exp_gen ls (nesting_level+1) tco size 
+                    val e2 = exp_gen ls (nesting_level+1) tco size
+                in
+                    ("sub", e1, e2)
+                end
+            |"mul" => 
+                let val e1 = exp_gen ls (nesting_level+1) tco size 
+                    val e2 = exp_gen ls (nesting_level+1) tco size
+                in
+                    ("mul", e1, e2)
+                end
+            |"div" => 
+                let val e1 = exp_gen ls (nesting_level+1) tco size 
+                    val e2 = exp_gen ls (nesting_level+1) tco size
+                in
+                    ("div", e1, e2)
+                end  
+        end
+    
+    fun assign_stmt_gen ls tco size = 
+        let val n = string() tco size 
+            val exp = exp_gen ls 0 tco size 
+        in
+            ("assign", n, exp)
+        end 
+    
+    fun print_stmt_gen ls tco size = 
+        let val exp = exp_gen ls 0 tco size 
+        in 
+            ("print", exp)
+        end 
+
+    fun stmt_gen ls tco size = 
+        let val stmt = one_of ["print", "assign"] tco size 
+        in 
+            case stmt of
+            "assign" => 
+                let val res = assign_stmt_gen ls tco size in 
+                res end
+            |"print" => 
+                let val res = print_stmt_gen ls tco size in 
+                res end
+        end 
+    
+    fun program_gen tco size = 
+        let val num_of_insts = (integer(0, size) tco size)
+            fun prog_gen_aux env p 0 = (p, env) 
+            | prog_gen_aux env p i = 
+                let val stmt = stmt_gen env tco size 
+                    val newEnv = if stmt.0 = "assign" then (append [stmt.1] env) else env
+                in 
+                    prog_gen_aux newEnv (append p [stmt]) (i-1)
+                end 
+            val (prog_stmts, last_env) = prog_gen_aux [] [] num_of_insts
+            val last_exp = exp_gen last_env 0 tco size
+            val prog = (prog_stmts, last_exp)                  
+        in 
+            prog
+        end
+    
+    fun test_prog_opt prog = 
+        (interpret prog) = (interpret (optimize_prog prog))
+    fun test_prog_shrink prog = 
+        (interpret prog) < 100
+    fun prop_program_shrink() = for_all ([program_gen], test_prog_shrink)
+    fun prop_program_opt() = for_all ([program_gen], test_prog_opt)
+in troupecheck [prop_program_opt, prop_program_shrink] authority 
+end

@@ -1,0 +1,269 @@
+import lists
+let fun write x auth =
+        fwrite ((getStdout auth), x)
+        
+    fun init_tc auth rng =  
+        receive [hn ("REQUEST_RNG", senderid) => 
+                    let val _ = send (senderid, rng) 
+                    in init_tc auth rng end,
+
+                hn ("REQUEST_AUTH", senderid) => 
+                    let val _ = send (senderid, auth) 
+                    in init_tc auth rng end,
+
+                hn ("UPDATE_RNG", senderid, new_rng) => 
+                    let val _ = send(senderid, "done") in
+                    init_tc auth new_rng end]
+
+    fun rec_rng ls =
+        receive [hn ("REQUEST_RND", senderid) =>
+                    let val rnd = random()
+                        val _ = send (senderid, rnd) 
+                        in rec_rng (rnd :: ls)
+                        end, 
+                hn ("REQUEST_SEQ", senderid) => 
+                    let val _ = send (senderid, (reverse ls))
+                    in rec_rng []
+                    end]
+    val recorder = spawn(fn() => rec_rng [])
+    val tcp = spawn(fn() => init_tc authority recorder)
+
+    fun save_times ls1 ls2 ls3 ls4= 
+        receive [hn ("ls1", x) => 
+                    save_times (x :: ls1) ls2 ls3 ls4,
+                hn ("ls2", x) => 
+                    save_times ls1 (x::ls2) ls3 ls4,
+                hn ("ls3", x) => 
+                    save_times ls1 ls2 (x::ls3) ls4,
+                hn ("ls4", x) => 
+                    save_times ls1 ls2 ls3 (x::ls4),
+                hn ("get_ls1", sender) => 
+                    let val _ = send (sender, ls1)
+                    in save_times [] ls2 ls3 ls4
+                    end,
+                hn ("get_ls2", sender) => 
+                    let val _ = send (sender, ls2)
+                    in save_times ls1 [] ls3 ls4
+                    end,
+                hn ("get_ls3", sender) => 
+                    let val _ = send (sender, ls3)
+                    in save_times ls1 ls2 [] ls4
+                    end,
+                hn ("get_ls4", sender) => 
+                    let val _ = send (sender, ls4)
+                    in save_times ls1 ls2 ls3 []
+                    end
+                ]
+    val state = spawn (fn() => save_times [] [] [] [])
+        
+    fun report_error error_reason tco = 
+        let val _ = send (tco, ("REQUEST_AUTH", self()))
+            val auth = receive [hn x => x]
+            val err_string = case error_reason of 
+            ("cant_generate", tries) => "Couldn't produce an instance that satisfies all strict constraints after "
+                                            ^ (toString tries) ^ " tries.\n"
+            | ("cant_satisfy", tries) => "No valid test could be generated after " ^ (toString tries) ^ " tries.\n"
+            | ("non_boolean_result", _) => "The property or precondition code returned a non-boolean result.\n"
+            | ("type_mismatch", _) => "The types' structure doesn't match the property.\n"
+            | ("illegal_gen_def", _ ) => "Generator is defined wrong - use tuple() or record() to combine generators.\n"
+            | ("record_mismatch", _) => "the number of names provided for record generation, does not match the number of types provided.\n"
+            | ("shrinking_looped", _) => "Shrinking looped.\n"
+            | ("non_string_type", _) => "An element of non-string type found when trying to convert list to string.\n"
+        in
+        write "\u001B[31m \nError: " auth; (* Changing the print color to red *)
+        write (err_string ^ "\u001B[0m") auth; (* Changing the color back *)
+        exit (auth, 0) end
+
+    fun build_record names vals = 
+        let fun aux r [] [] = r 
+            | aux r (n::ns) (v::vs) = 
+                aux (recordExtend(r, n, v)) ns vs in
+        aux {} names vals 
+        end
+    
+    (* Hardcoded until a tuple from list function is implemented in Troupe - an issue has been raised on GH.*)
+    fun build_tuple ls = 
+                case ls of 
+                [] => (0)
+                |[x] => (x) 
+                |[x1,x2] => (x1,x2)
+                |[x1,x2,x3] => (x1,x2,x3)
+                |[x1,x2,x3,x4] => (x1,x2,x3,x4)
+                |[x1,x2,x3,x4,x5] => (x1,x2,x3,x4,x5)
+                |[x1,x2,x3,x4,x5,x6] => (x1,x2,x3,x4,x5,x6)
+                |[x1,x2,x3,x4,x5,x6,x7] => (x1,x2,x3,x4,x5,x6,x7)
+                |[x1,x2,x3,x4,x5,x6,x7,x8] => (x1,x2,x3,x4,x5,x6,x7,x8)
+                |[x1,x2,x3,x4,x5,x6,x7,x8,x9] => (x1,x2,x3,x4,x5,x6,x7,x8,x9)
+                |[x1,x2,x3,x4,x5,x6,x7,x8,x9,x10] => (x1,x2,x3,x4,x5,x6,x7,x8,x9,x10)
+                |_ => (2, 3, 4, 5) 
+    
+    (* Combines a list of individual strings to a single string *)
+    fun list_to_string ls tco = 
+        foldl (fn (x,y) => if getType x <> "string" then report_error ("non_string_type", 0) tco else y ^ x) "" ls
+    
+    fun make_list (f, i) = 
+        case i of 
+        0 => []
+        | _ => (f()) :: (make_list (f, i-1))
+
+    fun float_gen (low, high) tco size = 
+        let val _ = send (tco, ("REQUEST_RNG", self()))
+            val pid = receive [hn x => x]
+            
+            val _ = send (pid, ("REQUEST_RND", self()))
+            val x = receive [hn x => x]
+
+            val _ = send (pid, ("REQUEST_RND", self()))
+            val bool_int = receive [hn x => x]
+            
+            val bool = bool_int < (1/2) 
+
+            val lInf = low = 1/0 (* check for inf *)
+            val hInf = high = 1/0
+
+            val res = 
+                case (lInf, hInf) of 
+                    (true, true) => if bool then x * size else -x * size
+                    | (true, false) => high - (x * size) 
+                    | (false, true) => low + (x * size)
+                    | (false, false) => low + (x * (high-low)) 
+        in res
+        end
+    
+    fun int_gen (low, high) tco size = 
+        let val res = floor (float_gen (low, high+1) tco size)
+        in res
+        end
+    
+    fun one_of ls tco size = 
+        let val idx = (int_gen (1, (length ls)) tco size)
+        in (nth ls idx)   
+        end  
+
+    fun bool_gen tco size = 
+        let val rnd = int_gen (0,1) tco size
+            val res = if rnd = 0 then false
+                      else true 
+        in res
+        end
+
+    (* NOTE: Generates only letters (upper and lower case) and numbers. *)
+    fun char_gen tco size =
+        let val chars = 
+            ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
+            "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+            "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
+            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+            val x = (int_gen (1, ((length chars)-1)) tco size)
+        in nth chars x 
+        end
+
+    fun label_gen tco size =
+        newlabel() 
+
+    fun tuple_gen ts tco size = 
+        let val start_gen = getTime()
+            val ts_vals = map (fn x => x tco size) ts
+            val end_gen = getTime()
+            val _ = send (state, ("ls1", end_gen - start_gen))
+            val start_build = getTime()
+            val res = build_tuple ts_vals
+            val end_build = getTime()
+            val _ = send (state, ("ls2", end_build - start_build))
+        in res
+        end
+
+    (* ns: list of strings - will be used as fieldnames *)
+    (* ts: list of generators - used to generate values for fields *)    
+    fun rec_gen ns ts tco size = 
+        if (length ns) <> (length ts) then 
+            report_error ("record_mismatch", 0) tco
+        else  
+            let val ts_vals = map (fn x => x tco size) ts
+                val res = build_record ns ts_vals 
+            in res
+            end 
+    
+    fun labeled_value_gen labels value_gen tco size = 
+        let val inst = value_gen tco size 
+            val lab = one_of labels tco size 
+        in inst raisedTo lab
+        end
+    
+    fun combined_labeled_gen labels gen tco size = 
+        let val labels_to_use = foldl(fn (x,y) => if (bool_gen tco size) then append y [x] else y)[`{}`] labels
+            val value = gen tco size 
+            val res = foldl (fn (x,y) => y raisedTo x) value labels_to_use 
+        in res 
+        end 
+    
+    (* NOTE: Generates only strings of letters (upper and lower case) and numbers. *)
+    fun string_gen tco size = 
+        let val char_ls = list_gen (char_gen) tco size
+            val string = list_to_string char_ls tco
+        in string
+        end
+
+    and list_gen () tco size = 
+        let val len = (int_gen (0, size) tco size)
+            val gen = generator_gen tco size
+            val res = make_list ((fn () => gen tco size), len) 
+        in res
+        end
+    | list_gen (generator) tco size = 
+        let val len = (int_gen (0, size) tco size)
+            val res = make_list ((fn () => generator tco size), len) 
+        in res
+        end
+    
+    and generator_gen tco size = 
+        let val inf = 1/0
+            val gens_ls = 
+                case (size mod 3) of 
+                0 => [(float_gen (inf, inf)), (int_gen(inf, inf)), bool_gen, char_gen, string_gen]
+                | _ => [(float_gen (inf, inf)), (int_gen(inf, inf)), bool_gen, (list_gen(generator_gen tco (size-1))), char_gen, string_gen,
+                            (tuple_gen (list_gen(generator_gen tco (size-1)))), (rec_gen (list_gen(string_gen)) ((generator_gen tco (size-1)))), 
+                            (labeled_value_gen (list_gen(string_gen)) (generator_gen tco (size-1)))]
+            val gen = one_of gens_ls tco size
+        in gen end
+    
+    fun sum [] acc = acc 
+    | sum (x::xs) acc =
+        sum xs (acc+x)
+
+    fun average ls = 
+        let val len = length ls 
+            val sum_ls = sum ls 0 
+        in (sum_ls/len)
+        end
+    val inf = 1/0
+    fun test_troupecheck_inner 101 = ()
+    | test_troupecheck_inner n = 
+        let val _ = tuple_gen [int_gen(inf, inf), string_gen] tcp n 
+        in test_troupecheck_inner (n+1)
+        end
+    
+    fun test_troupecheck ls1 ls2 0 = (ls1, ls2)
+    | test_troupecheck ls1 ls2 n =
+        let val _ = test_troupecheck_inner 0 
+            val _ = send(state, ("get_ls1", self()))
+            val gens = receive [hn x => x]
+            val _ = send(state, ("get_ls2", self()))
+            val builds = receive [hn x => x]
+            val sum_gens = sum gens 0
+            val sum_builds = sum builds 0
+        in test_troupecheck (append ls1 [sum_gens]) (append ls2 [sum_builds]) (n-1)
+        end
+    
+    val (gens, builds) = test_troupecheck [] [] 100
+    val avrg_gens = average gens 
+    val avrg_builds = average builds
+in 
+    print "generating time:";
+    print avrg_gens;
+    print "building time:";
+    print avrg_builds
+end
+    
+    

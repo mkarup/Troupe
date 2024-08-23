@@ -1,0 +1,35 @@
+import troupecheck 
+import lists
+(* NOTE: In order run this the 'troupecheck.trp' library file must be modified, 
+         so that the troupecheck function does not exit the runtime - i.e. replace the call to 'exit(authority, 0)' 
+         with '()', and run make libs, from Troupe directory. 
+         Remember to change back! *)
+(* This file times how long it takes takes troupecheck to test a property on tuples, that is always true.
+    It times this process 100 times and returns the average *)
+let fun sum [] acc = acc 
+    | sum (x::xs) acc =
+        sum xs (acc+x)
+
+    fun average ls = 
+        let val len = length ls 
+            val sum_ls = sum ls 0 
+        in (sum_ls/len)
+        end
+
+    fun bool_commutative x y = 
+        (x andalso y) = (y andalso x)
+    
+    fun prop_bool_test() = for_all ([boolean(), boolean()], bool_commutative)
+
+    fun test_troupecheck(ls, 0) = ls
+    | test_troupecheck(ls, n) = 
+    let val startT = getTime()
+        val _ = troupecheck [prop_bool_test] authority 
+        val endT = getTime()
+        val elapsedMilliseconds = endT - startT
+        val newList = append ls [elapsedMilliseconds]
+        val newN = (n-1)
+    in test_troupecheck(newList, newN)
+    end
+in average (test_troupecheck([], 100))
+end

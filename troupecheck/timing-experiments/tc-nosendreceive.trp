@@ -1,0 +1,515 @@
+import lists
+
+(*
+-------------------------------- 
+INIT FUNCTION
+
+To be called when  starting out testing
+
+--------------------------------
+*)
+
+(* 
+--------------------------------
+PRINTING TO CONSOLE
+
+Simple functions for more convenient printing to console.
+
+-------------------------------- 
+*)  
+let fun write x auth =
+        fwrite ((getStdout auth), x)
+
+    fun args_toString args = 
+        let fun aux_toString acc (x0::x1::xs) = aux_toString (acc ^ (toString x0) ^ ", ") (x1::xs)
+            | aux_toString acc (x::xs) = acc ^ (toString x) in 
+        aux_toString "" args end
+
+(* 
+--------------------------------
+ERROR HANDLING
+
+Handles the printing of appropriate error messages for errors that may occur in the use of TroupeCheck.
+
+-------------------------------- 
+*)
+    fun report_error error_reason tco = 
+        let val auth = authority
+            val err_string = case error_reason of 
+            ("cant_generate", tries) => "Couldn't produce an instance that satisfies all strict constraints after "
+                                            ^ (toString tries) ^ " tries.\n"
+            | ("cant_satisfy", tries) => "No valid test could be generated after " ^ (toString tries) ^ " tries.\n"
+            | ("non_boolean_result", _) => "The property or precondition code returned a non-boolean result.\n"
+            | ("type_mismatch", _) => "The types' structure doesn't match the property.\n"
+            | ("illegal_gen_def", _ ) => "Generator is defined wrong - use tuple() or record() to combine generators.\n"
+            | ("record_mismatch", _) => "the number of names provided for record generation, does not match the number of types provided.\n"
+            | ("shrinking_looped", _) => "Shrinking looped.\n"
+            | ("non_string_type", _) => "An element of non-string type found when trying to convert list to string.\n"
+        in
+        write "\u001B[31m \nError: " auth; (* Changing the print color to red *)
+        write (err_string ^ "\u001B[0m") auth; (* Changing the color back *)
+        exit (auth, 0) end
+    
+    fun boolean_check x tco = 
+        if (getType x)<>"boolean" then report_error ("non_boolean_result", 0) tco else ()
+
+    fun function_not_done_check p tco = 
+        if (getType p)<>"function" then report_error ("type_mismatch", 0) tco else ()
+(*
+--------------------------------
+UTILS
+
+Different utility functions that are used across the library.
+
+-------------------------------- 
+*)  
+    fun remove_nth n [] i = []
+    | remove_nth n (x::xs) i = 
+        if n = i then xs
+        else x :: (remove_nth n xs (i + 1))
+
+    fun make_list (f, i) = 
+        case i of 
+        0 => []
+        | _ => append [f()] (make_list (f, i-1))
+    
+
+(* TODO: handle when arguments are passed to a property that does not take arguments *)
+    fun apply_args p l tco =
+        let val auth = authority
+        in case l of 
+            [] =>  (* this case is only reached if there are no generators to begin with *)
+                let val _ = boolean_check (p()) tco
+                    val res = p() 
+                    val _ = blockdecl auth 
+                in declassify (res, auth, `{}`) 
+                end
+            | (x::xs) => 
+                let val res = foldl (fn (x,y) => function_not_done_check y tco; y x) p l
+                    val _ = boolean_check res tco
+                    val _ = blockdecl auth
+                in declassify (res, auth, `{}`)
+            end
+        end
+    
+    fun string_to_list s = 
+        let fun aux "" acc = acc 
+            | aux s acc = 
+                let val x = substring (s, 0, 1)
+                    val xs = substring (s, 1, 1/0) in 
+                aux xs (append acc [x]) end in 
+        aux s [] end
+    
+    (* Combines a list of individual strings to a single string *)
+    fun list_to_string ls tco = 
+        foldl (fn (x,y) => if getType x <> "string" then report_error ("non_string_type", 0) tco else y ^ x) "" ls
+    
+    fun string_length s = 
+        length (string_to_list s)
+
+    fun report_fail_reason rec noOfTests tco =
+        let val auth = authority in
+        case rec.failReason of
+            "false_prop" => 
+                write "\nFailure at input: " auth;
+                write (args_toString rec.ctx) auth;
+                write ("\nAfter running: " ^ (toString (noOfTests - rec.remTests + 1)) ^ " test(s)\n") auth
+        end
+    
+    fun build_record names vals = 
+        let fun aux r [] [] = r 
+            | aux r (n::ns) (v::vs) = 
+                aux (recordExtend(r, n, v)) ns vs in
+        aux {} names vals 
+        end
+    
+    (* Hardcoded until a tuple from list function is implemented in Troupe - an issue has been raised on GH.*)
+    fun build_tuple ls = 
+                case ls of 
+                [] => (0)
+                |[x] => (x) 
+                |[x1,x2] => (x1,x2)
+                |[x1,x2,x3] => (x1,x2,x3)
+                |[x1,x2,x3,x4] => (x1,x2,x3,x4)
+                |[x1,x2,x3,x4,x5] => (x1,x2,x3,x4,x5)
+                |[x1,x2,x3,x4,x5,x6] => (x1,x2,x3,x4,x5,x6)
+                |[x1,x2,x3,x4,x5,x6,x7] => (x1,x2,x3,x4,x5,x6,x7)
+                |[x1,x2,x3,x4,x5,x6,x7,x8] => (x1,x2,x3,x4,x5,x6,x7,x8)
+                |[x1,x2,x3,x4,x5,x6,x7,x8,x9] => (x1,x2,x3,x4,x5,x6,x7,x8,x9)
+                |[x1,x2,x3,x4,x5,x6,x7,x8,x9,x10] => (x1,x2,x3,x4,x5,x6,x7,x8,x9,x10)
+                |_ => (2, 3, 4, 5) 
+    
+        fun dec_nth list idx = 
+            let fun dec_nth_aux [] acc i = acc 
+                | dec_nth_aux (x::xs) acc i =
+                    case i = idx of 
+                    true =>
+                        let val dec_val = if x <= 1/10000 then 0 else x/(3/2) in
+                        append (append acc [dec_val]) xs end
+                    | false => dec_nth_aux xs (append acc [x]) (i+1)
+        in  
+            dec_nth_aux list [] 0 end
+        
+    fun zero_nth list idx = 
+            let fun zero_nth_aux [] acc i = acc 
+                | zero_nth_aux (x::xs) acc i =
+                    case i = idx of 
+                    true =>
+                        append (append acc [0]) xs
+                    | false => zero_nth_aux xs (append acc [x]) (i+1)
+        in  
+            zero_nth_aux list [] 0 end
+    
+    fun dec_all seq = 
+        let fun dec_all_aux [] i = [] 
+            | dec_all_aux (x::xs) i = 
+                if x = 0 then
+                    dec_all_aux xs (i+1)
+                else 
+                    [(fn () =>  (zero_nth seq i)), (fn() => [fn () =>  (dec_nth seq i), fn () => dec_all_aux xs (i+1)])] in 
+        dec_all_aux seq 0 end
+    
+    fun seqs_of_seq sequence lengths = 
+        let fun aux seq acc 0 = (acc, seq) 
+            | aux (x::xs) acc n = 
+                aux xs (append acc [x]) (n-1) 
+            val (res, _) = (foldl (fn (x,(acc, s)) => 
+                                let val (curr_acc, curr_seq) = aux s [] x in 
+                                (append acc [curr_acc], curr_seq) end)([], sequence) lengths)
+        in res 
+        end
+
+    fun cutoff_at list idx = 
+        let fun aux ls acc 0 = acc
+            | aux (x::xs) acc i = 
+                aux xs (append acc [x]) (i-1) in 
+        aux list [] idx end 
+    
+    fun for_i f y 0 = y
+      | for_i f y i = for_i f (f (i,y)) (i-1)
+(* 
+--------------------------------
+SHRINKING
+
+Works by first using random shrinking when a failing example has been found (shrink & random_shrink_aux). 
+Random shrinking means simply generating new test cases with gradually smaller size, to find a case smaller than the original one. This rarely produces a minmal result.
+The smallest randomly shrunk instance is then further shrunk using internal shrinking. (internal_shrink & internal_shrink_aux)
+Internal shrinking means keeping track of all random decision made during generation, and then re-generating with smaller "random" decisions.
+
+This part of the code also contains the functionality for recording all random decisions, and replaying these random decisions (rec_rng & rep_rng).
+All of these functions are spawned and then requests or updates may be send to them, so that the correct RNG's are used at different points in the code.
+
+-------------------------------- 
+*)  
+    fun random_shrink_aux generators prop pre success size counter divi tco =
+        if (counter = 1000) orelse (size = 0) then {count = success, size = size} else
+        let val new_size = floor (size/divi)
+            val (shrunk_args) = 
+                                        foldl (fn (x, (arg_acc)) => 
+                                                let val arg = x tco new_size
+                                                in (append arg_acc [arg]) 
+                                                end) ([]) generators
+            val precond_is_met = if (pre <> ()) then (apply_args pre shrunk_args tco) else true 
+        in
+            case (apply_args prop shrunk_args tco) orelse (precond_is_met = false) of
+                true => random_shrink_aux generators prop pre success size (counter+1) (divi+2) tco
+                | false =>
+                    random_shrink_aux generators prop pre (success+1) new_size (0) 2 tco
+        end
+
+    fun shrink generators prop pre size counter tco = 
+        let val res = random_shrink_aux generators prop pre 0 size counter 2 tco
+        in 
+            res
+        end 
+(*
+--------------------------------
+GENERATORS
+
+Contains generators for Troupe's built-in types. All generators must return a single instance of the type they generate, 
+and take a 'size' argument as the very last argument.
+This size will be given to all generators in the generation of test cases (and shrinking).
+Generators that take more arguments, will need to have these passed along to them before passing the generator to the testing facilities
+(convenience functions for this are supplied later). 
+
+It is recommended that all user defined generators only make use of pre-defined generators or their matching convenience functions
+for random decisions (i.e. a call to float_gen/float() or int_gen/integer()), instead of having to send and receive the correct messages to the RNG threads.
+However, it can be done if the users wishes to and understands what is going on.
+
+-------------------------------- 
+*)   
+    
+    fun float_gen (low, high) tco size = 
+        let val x = random()
+
+            val bool_int = random ()
+            
+            val bool = bool_int < (1/2) 
+
+            val lInf = low = 1/0 (* check for inf *)
+            val hInf = high = 1/0
+
+            val res = 
+                case (lInf, hInf) of 
+                    (true, true) => if bool then x * size else -x * size
+                    | (true, false) => high - (x * size) 
+                    | (false, true) => low + (x * size)
+                    | (false, false) => low + (x * (high-low)) 
+        in res
+        end
+    
+    fun int_gen (low, high) tco size = 
+        let val res = floor (float_gen (low, high+1) tco size)
+        in res
+        end
+    
+    fun one_of ls tco size = 
+        let val idx = (int_gen (1, (length ls)) tco size)
+        in (nth ls idx)   
+        end  
+
+    fun bool_gen tco size = 
+        let val rnd = int_gen (0,1) tco size
+            val res = if rnd = 0 then false
+                      else true 
+        in res
+        end
+
+    (* NOTE: Generates only letters (upper and lower case) and numbers. *)
+    fun char_gen tco size =
+        let val chars = 
+            ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
+            "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+            "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
+            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] (* length: 62 *)
+            val x = (int_gen (1, (62-1)) tco size)
+        in nth chars x 
+        end
+
+    fun label_gen tco size =
+        newlabel() 
+    
+    (* ts: list of generators - used to generate values for fields *)
+    (* NOTE: Hardcoded for tuple of up to 10 elements  - see build_tuple in 'UTILS' *)
+    fun tuple_gen ts tco size = 
+        let val ts_vals = map (fn x => x tco size) ts
+        in build_tuple ts_vals
+        end
+
+    (* ns: list of strings - will be used as fieldnames *)
+    (* ts: list of generators - used to generate values for fields *)    
+    fun rec_gen ns ts tco size = 
+        if (length ns) <> (length ts) then 
+            report_error ("record_mismatch", 0) tco
+        else  
+            let val ts_vals = map (fn x => x tco size) ts
+                val res = build_record ns ts_vals 
+            in res
+            end 
+    
+    fun labeled_value_gen labels value_gen tco size = 
+        let val inst = value_gen tco size 
+            val lab = one_of labels tco size 
+        in inst raisedTo lab
+        end
+    
+    fun combined_labeled_gen labels gen tco size = 
+        let val labels_to_use = foldl(fn (x,y) => if (bool_gen tco size) then append y [x] else y)[`{}`] labels
+            val value = gen tco size 
+            val res = foldl (fn (x,y) => y raisedTo x) value labels_to_use 
+        in res 
+        end 
+    
+        (* NOTE: Generates only strings of letters (upper and lower case) and numbers. *)
+    fun string_gen tco size = 
+        let val length = (int_gen (0, size) tco size)
+            fun string_aux acc 0 = acc 
+            | string_aux acc i = string_aux ((char_gen tco size) ^ acc) (i-1) 
+            val string = (string_aux "" length)
+        in string
+        end
+
+    and list_gen () tco size = 
+        let val len = (int_gen (0, size) tco size)
+            val gen = generator_gen tco size
+            val res = make_list ((fn () => gen tco size), len) 
+        in res
+        end
+    | list_gen (generator) tco size = 
+        let val len = (int_gen (0, size) tco size)
+            val res = make_list ((fn () => generator tco size), len) 
+        in res
+        end
+    
+    and generator_gen tco size = 
+        let val inf = 1/0
+            val gens_ls = 
+                case (size mod 3) of 
+                0 => [(float_gen (inf, inf)), (int_gen(inf, inf)), bool_gen, char_gen, string_gen]
+                | _ => [(float_gen (inf, inf)), (int_gen(inf, inf)), bool_gen, (list_gen(generator_gen tco (size-1))), char_gen, string_gen,
+                            (tuple_gen (list_gen(generator_gen tco (size-1)))), (rec_gen (list_gen(string_gen)) ((generator_gen tco (size-1)))), 
+                            (labeled_value_gen (list_gen(string_gen)) (generator_gen tco (size-1)))]
+            val gen = one_of gens_ls tco size
+        in gen end
+        
+(* 
+--------------------------------
+CORE FUNCTIONALITY
+
+Handles preparing the recorder RNG, running the tests, calling the shrinker, and reporting the results to the user.
+
+-------------------------------- 
+*)              
+    fun core_forall (generators, prop, 0, size, pre, cap, tco) = {failReason = (), ctx = (), remTests = 0, size = size}
+        |core_forall (generators, prop, i, size, pre, cap, tco) =  
+            let val auth = authority
+                val (args) = foldl (fn (x, (arg_acc)) => 
+                                                let val arg = x tco size
+                                                in (append arg_acc [arg]) 
+                                                end) ([]) generators
+            in
+                case pre of 
+                    () =>
+                        if (apply_args prop args tco) then 
+                            let val _ = write "." auth 
+                            in core_forall (generators, prop, i-1, size+1, pre, cap, tco)
+                            end
+                        else 
+                            let val _ = write "!" auth
+                            in {failReason = "false_prop", ctx = args, remTests = i, size = size} 
+                            end
+                    | _ => 
+                        if (apply_args pre args tco) then 
+                            if (apply_args prop args tco) then (write "." auth; core_forall (generators, prop, i-1, size+1, pre, cap, tco))
+                            else 
+                                let val _ = write "!" auth
+                                in {failReason = "false_prop", ctx = args, remTests = i, size = size} 
+                                end
+                        else 
+                        let val _ = write "x" auth
+                        in if (size = cap) andalso (i*5 = cap) then report_error ("cant_satisfy", size) tco
+                            else if size = cap then {failReason = (), ctx = (), remTests = i, size = size}
+                            else core_forall (generators, prop, i, size+1, pre, cap, tco) 
+                        end
+            end
+
+    fun run_tests (generators, p, to_shrink, noOfTests) auth = 
+        let val (prop, pre) = 
+                case p of    
+                    (x,y) => (x,y)
+                    | x => (x, ())
+            val tco = ()
+            val res = core_forall (generators, prop, noOfTests, 0, pre, (noOfTests*5), tco) in 
+            case res.failReason of
+                () => write ("\u001B[1m \u001B[32m \nSuccess: \u001B[0mPassed all " ^ (toString noOfTests) ^ " test(s).\n") auth; true
+                |_ => 
+                    report_fail_reason res noOfTests tco; 
+                    if to_shrink then 
+                        (write ("\u001B[1m\u001B[34mShrinking\u001B[0m:") auth;
+                        let val shrink_res = shrink generators prop pre res.size 0 tco in
+                        write "\nFailing test case was shrunk to:\n" auth;
+                        write (args_toString shrink_res.shrunk_ctx) auth;
+                        write ("\nAfter " ^ (toString shrink_res.count) ^ " iterations.\n") auth;
+                        false
+                        end)
+                    else 
+                        false
+        end
+
+    fun for_all (generators, p) auth = run_tests (generators, p, true, 100) auth 
+    | for_all (generators, p, noOfTests) auth = run_tests (generators, p, true, noOfTests) auth 
+
+    fun for_all_noshrink (generators, p) auth = run_tests (generators, p, false, 100) auth 
+    | for_all_noshrink (generators, p, noOfTests) auth = run_tests (generators, p, false, noOfTests) auth 
+
+    fun troupecheck props auth = 
+        let val n = toString (length props)
+            fun troupecheck_aux [] i =  ()(* exit(auth, 0) *)
+            | troupecheck_aux (x::xs) i =
+                let val _ = write ("\nRunning test " ^ (toString i) ^ " of " ^ n ^ ":\n") auth
+                    val res = x() auth
+                in troupecheck_aux xs (i+1) end
+        in troupecheck_aux props 1 
+        end
+
+(* 
+--------------------------------
+CONVENIENCE FUNCTIONS 
+
+These are functions that make it easier for the user to make use of the different generators, and define their own generators.
+
+-------------------------------- 
+*)
+    val inf = 1 / 0
+    fun integer () = int_gen(inf, inf)
+        | integer (l, h) = int_gen(l, h)
+    
+    fun pos_integer () = integer(0, inf)
+
+    fun neg_integer () = integer(inf, -1)
+
+    fun float () = float_gen(inf, inf)
+        | float (h, l) = float_gen(h, l)
+
+    fun pos_float () = float(0, inf)
+
+    fun neg_float () = float(inf, 0)
+
+    fun boolean () = bool_gen
+
+    fun list () = list_gen () 
+        |list (type) = list_gen (type)
+
+    fun string () = string_gen
+
+    fun char () = char_gen
+
+    fun generator() = generator_gen
+
+    fun tuple (ts) = tuple_gen ts
+    
+    fun labeled_value (ls, gen) = labeled_value_gen ls gen 
+
+    fun combined_labeled_value (ls, gen) = combined_labeled_gen ls gen
+
+    fun label() = label_gen
+
+    fun record (ns, ts) = rec_gen ns ts
+
+
+
+
+    fun sum [] acc = acc 
+    | sum (x::xs) acc =
+        sum xs (acc+x)
+
+    fun average ls = 
+        let val len = length ls 
+            val sum_ls = sum ls 0 
+        in (sum_ls/len)
+        end
+
+    fun tuple_test (number, string) = 
+        getType number = "number"
+    
+    fun prop_tuple_test() = for_all ([tuple([integer(), string()])], tuple_test)
+
+    fun int_test x = 
+        (getType x) = "number"
+    
+    fun prop_int_test() = for_all ([integer()], int_test)
+
+    fun test_troupecheck(ls, 0) = ls
+    | test_troupecheck(ls, n) = 
+    let val startT = getTime()
+        val _ = troupecheck [prop_tuple_test] authority 
+        val endT = getTime()
+        val elapsedMilliseconds = endT - startT
+        val newList = append ls [elapsedMilliseconds]
+        val newN = (n-1)
+    in test_troupecheck(newList, newN)
+    end
+in 
+    average (test_troupecheck([], 100))
+end

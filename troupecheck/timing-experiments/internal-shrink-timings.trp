@@ -1,0 +1,607 @@
+import troupecheck
+import lists
+(* NOTE: for this program to work, troupecheck library file needs to modified to return a tuple on the form: 
+        (<<bool>>, <<counterexample sequence>>, <<size at which test failed>>, <<counterexample>>)
+    when a failing a test. 
+    The test that is run must always fail at some point. 
+    This program was only made to time different examples of internal shrinking and not meant for further usage.*)
+
+    
+let fun eval exp env =
+    case exp of
+      ("num", n) => n
+    | ("var", n) => lookup env n ("unknown variable " ^ n)
+    | ("add", e1, e2) => (eval e1 env) + (eval e2 env)
+    | ("sub", e1, e2) => (eval e1 env) - (eval e2 env)
+    | ("mul", e1, e2) => (eval e1 env) * (eval e2 env)
+    | ("div", e1, e2) => (eval e1 env) / (eval e2 env)
+    | _ => print ("Error: ill defined expression"); exit (authority, 1)
+
+     fun execute stmt env =
+        case stmt of
+        ("assign", var, exp) =>
+            let val value = eval exp env
+            in
+                append [(var, value)] env
+            end
+        | ("print", exp) => (()(* print ("from prog: " ^ (toString (eval exp env)) *); env)
+
+    fun remove_nth n [] i = []
+    | remove_nth n (x::xs) i = 
+        if n = i then xs
+        else x :: (remove_nth n xs (i + 1))
+    
+    fun interpret prog =
+        let fun interpretHelper [] env = env
+            | interpretHelper (stmt :: rest) env =
+                let val newEnv = execute stmt env
+                in
+                    interpretHelper rest newEnv
+                end
+            val (stmts, exp) = prog
+            val last_env = (interpretHelper stmts [])
+        in
+            eval exp last_env
+        end
+    
+    fun optimize_prog prog =
+        let val (stmts, exp) = prog
+            fun optimize_exp exp =
+                case exp of
+                ("num", n) => ("num", n)
+                | ("var", x) => ("var", x)
+                | ("add", e1, e2) => 
+                    (case e1 of 
+                    ("num", n1) => (case e2 of 
+                                    ("num", n2) => ("num", (n1+n2))
+                                    |_ => ("add", (optimize_exp e1), (optimize_exp e2)))
+                    | _ => ("add", (optimize_exp e1), (optimize_exp e2)))
+                | ("sub", e1, e2) => 
+                    (case e1 of 
+                    ("num", n1) => (case e2 of 
+                                    ("num", n2) => ("num", (n1-n2))
+                                    |_ => ("sub", (optimize_exp e1), (optimize_exp e2)) )
+                    |_ => ("sub", (optimize_exp e1), (optimize_exp e2)))
+                | ("mul", e1, e2) => 
+                    (case e1 of 
+                    ("num", n1) => (case e2 of 
+                                    ("num", n2) => ("num", (n1*n2))
+                                    |_ => ("mul", (optimize_exp e1), (optimize_exp e2)) )
+                    |_ => ("mul", (optimize_exp e1), (optimize_exp e2)))
+                | ("div", e1, e2) => 
+                    (case e1 of 
+                    ("num", n1) => (case e2 of 
+                                    ("num", n2) => if ((n1 = 0) andalso (n2 = 0)) then ("div", e1, e2) else ("num", (n1/n2))
+                                    |_ => ("div", (optimize_exp e1), (optimize_exp e2)) )
+                    |_ => ("div", (optimize_exp e1), (optimize_exp e2)))
+
+            fun optimize_stmt stmt =
+                case stmt of
+                ("assign", var, exp) => ("assign", var, (optimize_exp exp))
+                | ("print", exp) => ("print", (optimize_exp exp))
+        in
+            ((map optimize_stmt stmts), optimize_exp exp)
+        end 
+
+    fun exp_gen ls nesting_level tco size = 
+        let val exp_ts = 
+            if nesting_level = 2 then ["num"] 
+            else (if length ls = 0 then ["num", "add", "sub", "mul", "div"] 
+            else ["var", "num", "add", "sub", "mul", "div"])
+            val exp_type = one_of exp_ts tco size
+        in 
+            case exp_type of 
+            "num" => 
+                let val value = integer(1, inf) tco size in
+                ("num", value) end
+            | "var" => 
+                let val value = one_of ls tco size in
+                ("var", value) end 
+            |"add" => 
+                let val e1 = exp_gen ls (nesting_level+1) tco size 
+                    val e2 = exp_gen ls (nesting_level+1) tco size
+                in
+                    ("add", e1, e2)
+                end
+            |"sub" => 
+                let val e1 = exp_gen ls (nesting_level+1) tco size 
+                    val e2 = exp_gen ls (nesting_level+1) tco size
+                in
+                    ("sub", e1, e2)
+                end
+            |"mul" => 
+                let val e1 = exp_gen ls (nesting_level+1) tco size 
+                    val e2 = exp_gen ls (nesting_level+1) tco size
+                in
+                    ("mul", e1, e2)
+                end
+            |"div" => 
+                let val e1 = exp_gen ls (nesting_level+1) tco size 
+                    val e2 = exp_gen ls (nesting_level+1) tco size
+                in
+                    ("div", e1, e2)
+                end  
+        end
+    
+    fun assign_stmt_gen ls tco size = 
+        let val n = string() tco size 
+            val exp = exp_gen ls 0 tco size 
+        in
+            ("assign", n, exp)
+        end 
+    
+    fun print_stmt_gen ls tco size = 
+        let val exp = exp_gen ls 0 tco size 
+        in 
+            ("print", exp)
+        end 
+
+    fun stmt_gen ls tco size = 
+        let val stmt = one_of ["print", "assign"] tco size 
+        in 
+            case stmt of
+            "assign" => 
+                let val res = assign_stmt_gen ls tco size in 
+                res end
+            |"print" => 
+                let val res = print_stmt_gen ls tco size in 
+                res end
+        end 
+    
+    fun program_gen tco size = 
+        let val num_of_insts = (integer(0, size) tco size)
+            fun prog_gen_aux env p 0 = (p, env) 
+            | prog_gen_aux env p i = 
+                let val stmt = stmt_gen env tco size 
+                    val newEnv = if stmt.0 = "assign" then (append [stmt.1] env) else env
+                in 
+                    prog_gen_aux newEnv (append p [stmt]) (i-1)
+                end 
+            val (prog_stmts, last_env) = prog_gen_aux [] [] num_of_insts
+            val last_exp = exp_gen last_env 0 tco size
+            val prog = (prog_stmts, last_exp)                  
+        in 
+            prog
+        end
+    
+    fun test_prog_shrink prog = 
+        (interpret prog) < 100
+    (* -----------Tests shrinking of even numbers *)
+    fun even_number_gen tco size = 
+        let val int = integer() tco size 
+        in int * 2 
+        end
+    fun even_test i = 
+        (i mod 2 = 0) andalso (i < 10)
+    (* -----------Tests the shrinking of a record with an integer and a string *)
+    fun record_shrink_test r = 
+        r.theInteger < 50
+    
+
+    (* -----------Tests the shrinking of a two strings*)
+    fun append_always_longer s1 s2 = 
+        let fun string_to_list s = 
+            let fun aux "" acc = acc 
+                | aux s acc = 
+                    let val x = substring (s, 0, 1)
+                        val xs = substring (s, 1, 1/0) 
+                    in aux xs (append acc [x]) 
+                    end 
+            in aux s [] 
+            end
+        fun string_length s = 
+            length (string_to_list s)
+        in string_length s1 < string_length (s1 ^ s2)
+        end
+
+    (* -----------Tests the shrinking of a list of integers *)
+    fun filter_less ([], _) = []
+    | filter_less ((x::xs), p) = 
+        if x < p then append [x] (filter_less (xs, p)) else (filter_less (xs, p))
+
+    fun filter_greater ([], _) = []
+    | filter_greater ((x::xs), p) = 
+        if x > p  then append [x] (filter_greater (xs, p)) else (filter_greater (xs, p))
+
+
+    fun my_quicksort [] = []
+    | my_quicksort (x::xs) =
+        let val smaller = my_quicksort(filter_less(xs, x))
+            val greater = my_quicksort(filter_greater(xs, x)) in 
+        append (append smaller [x]) (greater) end 
+    fun my_sort_keep_length xs = 
+        length xs = length (my_quicksort(xs))
+
+    (* -----------Tests the shrinking of a list of strings and a single string *)
+    fun bad_insert xs x = 
+        if length xs < 10 then append [x] xs else
+        xs
+    fun test_bad_insert xs x =
+        length (bad_insert xs x) = (length xs) + 1 
+    
+    (* -----------Tests the shrinking of a float and a one_of statement with a long list *)
+    fun float_one_of_bad_shrink flt oneOf = 
+        if (flt > 50) andalso (oneOf >= 1) then false else true
+
+    (* Statements to choose from *)
+    fun program_shrink() = for_all ([program_gen], test_prog_shrink)
+    fun record_int_string_shrink() = for_all ([(record (["theInteger", "theString"], [integer(), string()]))], record_shrink_test)
+    fun two_strings_shrink() = for_all ([string(), string()], append_always_longer)
+    fun integer_list_shrink() = for_all ([list(integer())], my_sort_keep_length)
+    fun string_and_string_list_shrink() = for_all ([list(string()), string()], test_bad_insert)
+    fun float_and_one_of_shrink() = for_all ([float(), one_of [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]], float_one_of_bad_shrink)
+
+
+
+(* 
+------------------------------
+INTERNAL SHRINKING
+
+------------------------------
+*)
+    fun report_error tup = 
+        print tup.0;
+        exit (authority, 0)
+
+    fun boolean_check x tco = 
+        ()
+
+    fun function_not_done_check p tco = 
+        ()
+(*
+--------------------------------
+UTILS
+
+Different utility functions that are used across the library.
+
+-------------------------------- 
+*)  
+    fun remove_nth n [] i = []
+    | remove_nth n (x::xs) i = 
+        if n = i then xs
+        else x :: (remove_nth n xs (i + 1))
+    
+    fun make_list (f, i) = 
+        case i of 
+        0 => []
+        | _ => (f()) :: (make_list (f, i-1))
+    
+    fun abs_value x = 
+    if x < 0 then -x else x 
+
+(* TODO: handle when arguments are passed to a property that does not take arguments *)
+    fun apply_args p l tco =
+        let val _ = send (tco, ("REQUEST_AUTH", self()))
+            val auth = receive [hn x => x]
+        in case l of 
+            [] =>  (* this case is only reached if there are no generators to begin with *)
+                let val _ = boolean_check (p()) tco
+                    val res = p() 
+                    val _ = blockdecl auth 
+                in declassify (res, auth, `{}`) 
+                end
+            | (x::xs) => 
+                let val res = foldl (fn (x,y) => function_not_done_check y tco; y x) p l
+                    val _ = boolean_check res tco
+                    val _ = blockdecl auth
+                in declassify (res, auth, `{}`) 
+                end
+        end
+    
+    fun string_to_list s = 
+        let fun aux "" acc = reverse acc 
+            | aux s acc = 
+                let val x = substring (s, 0, 1)
+                    val xs = substring (s, 1, 1/0) in 
+                aux xs (x :: acc) end in 
+        aux s [] end
+    
+    (* Combines a list of individual strings to a single string *)
+    fun list_to_string ls tco = 
+        foldl (fn (x,y) => if getType x <> "string" then report_error ("non_string_type", 0) tco else y ^ x) "" ls
+    
+    fun string_length s = 
+        length (string_to_list s)
+    
+    fun build_record names vals = 
+        let fun aux r [] [] = r 
+            | aux r (n::ns) (v::vs) = 
+                aux (recordExtend(r, n, v)) ns vs in
+        aux {} names vals 
+        end
+    
+    (* Hardcoded until a tuple from list function is implemented in Troupe - an issue has been raised on GH.*)
+    fun build_tuple ls = 
+                case ls of 
+                [] => (0)
+                |[x] => (x) 
+                |[x1,x2] => (x1,x2)
+                |[x1,x2,x3] => (x1,x2,x3)
+                |[x1,x2,x3,x4] => (x1,x2,x3,x4)
+                |[x1,x2,x3,x4,x5] => (x1,x2,x3,x4,x5)
+                |[x1,x2,x3,x4,x5,x6] => (x1,x2,x3,x4,x5,x6)
+                |[x1,x2,x3,x4,x5,x6,x7] => (x1,x2,x3,x4,x5,x6,x7)
+                |[x1,x2,x3,x4,x5,x6,x7,x8] => (x1,x2,x3,x4,x5,x6,x7,x8)
+                |[x1,x2,x3,x4,x5,x6,x7,x8,x9] => (x1,x2,x3,x4,x5,x6,x7,x8,x9)
+                |[x1,x2,x3,x4,x5,x6,x7,x8,x9,x10] => (x1,x2,x3,x4,x5,x6,x7,x8,x9,x10)
+                |_ => (2, 3, 4, 5) 
+    
+        fun dec_nth list idx = 
+            let fun dec_nth_aux [] acc i = reverse acc 
+                | dec_nth_aux (x::xs) acc i =
+                    case i = idx of 
+                    true =>
+                        let val dec_val = if x <= 1/10000 then 0 else x/(3/2) in
+                        append (reverse (0 :: acc)) xs end
+                    | false => dec_nth_aux xs (x :: acc) (i+1)
+        in  
+            dec_nth_aux list [] 0 end
+        
+    fun zero_nth list idx = 
+            let fun zero_nth_aux [] acc i = reverse acc 
+                | zero_nth_aux (x::xs) acc i =
+                    case i = idx of 
+                    true =>
+                        append (reverse (0 :: acc)) xs
+                    | false => zero_nth_aux xs (x :: acc) (i+1)
+        in  
+            zero_nth_aux list [] 0 end
+    
+    fun dec_all seq = 
+        let fun dec_all_aux [] i = [] 
+            | dec_all_aux (x::xs) i = 
+                if x = 0 then
+                    dec_all_aux xs (i+1)
+                else 
+                    [(fn () =>  (zero_nth seq i)), (fn() => [fn () =>  (dec_nth seq i), fn () => dec_all_aux xs (i+1)])] in 
+        dec_all_aux seq 0 end
+    
+    fun seqs_of_seq sequence lengths = 
+        let fun aux seq acc 0 = (reverse acc, seq) 
+            | aux (x::xs) acc n = 
+                aux xs (x :: acc) (n-1) 
+            val (res, _) = (foldl (fn (x,(acc, s)) => 
+                                let val (curr_acc, curr_seq) = aux s [] x in 
+                                (curr_acc :: acc, curr_seq) end)([], sequence) lengths)
+        in reverse res 
+        end
+
+    fun cutoff_at list idx = 
+        let fun aux ls acc 0 = reverse acc
+            | aux (x::xs) acc i = 
+                aux xs (x :: acc) (i-1) in 
+        aux list [] idx end 
+    
+    fun for_i f y 0 = y
+      | for_i f y i = for_i f (f (i,y)) (i-1)
+
+
+
+
+    fun init_tc auth rng =  
+        receive [hn ("REQUEST_RNG", senderid) => 
+                    let val _ = send (senderid, rng) 
+                    in init_tc auth rng end,
+
+                hn ("REQUEST_AUTH", senderid) => 
+                    let val _ = send (senderid, auth) 
+                    in init_tc auth rng end,
+
+                hn ("UPDATE_RNG", senderid, new_rng) => 
+                    let val _ = send(senderid, "done") in
+                    init_tc auth new_rng end]
+    
+    fun rec_rng ls =
+        receive [hn ("REQUEST_RND", senderid) =>
+                    let val rnd = random()
+                        val _ = send (senderid, rnd) 
+                        in rec_rng (rnd :: ls )
+                        end, 
+                hn ("REQUEST_SEQ", senderid) => 
+                    let val _ = send (senderid, (reverse ls))
+                    in rec_rng []
+                    end]
+    
+    fun rep_rng ls = 
+        receive [hn ("REQUEST_RND", senderid) => 
+                    case ls of 
+                    (x::xs) => 
+                        let val _ = send (senderid, x) 
+                        in rep_rng xs
+                        end 
+                    | [] => 
+                        let val _ = send (senderid, 0)
+                        in rep_rng ls 
+                        end, 
+                hn ("REQUEST_LEFT", senderid) => 
+                    let val _ = send (senderid, ls)
+                    in rep_rng [] 
+                    end, 
+                hn ("UPDATE_LS", new_ls) => 
+                    rep_rng new_ls]
+    
+    fun shrink_sized_sequence seqs gens prop pre size left_over_len idx_of_sized tco = 
+            let val _ = send(tco, ("REQUEST_RNG", self())) 
+                val pid = receive [hn x => x]
+                val _ = send(tco, ("REQUEST_AUTH", self())) 
+                val auth = receive [hn x => x]
+                val cap = ceil (((length (nth seqs (idx_of_sized+1)))-2)/left_over_len )(* number of to remove parts of the sequence *)
+                val size_ls = reverse (for_i (fn (x,y) => x :: y) [] (left_over_len-1))
+                fun aux i = 
+                    let val to_remove = reverse (foldl (fn (x,y) => ((i*left_over_len)-x) :: y)[i*left_over_len] size_ls)
+                            val new_seq = foldl (fn (x,y) => remove_nth x y 0) (nth seqs (idx_of_sized+1)) to_remove
+                            val new_seqs = mapi (fn (i, x) => if i = idx_of_sized then new_seq else x) seqs
+                            val new_args = mapi (fn (i, x) =>
+                                            let val _ = send (pid, ("UPDATE_LS", (nth new_seqs (i+1))))
+                                                val arg = x tco size
+                                            in arg
+                                            end) gens
+                    in case i = (cap) of 
+                    true => 
+                        (new_seqs, new_args)
+                    | false => 
+                        let val precond_is_met = if (pre <> ()) then (apply_args pre new_args tco) else true 
+                        in case (apply_args prop new_args tco) orelse (precond_is_met = false) of 
+                            true => aux (i+1)
+                            | false => (new_seqs, new_args) 
+                        end 
+                    end 
+            in aux 1
+            end
+
+
+
+    fun internal_shrink_aux seqs gens lengths prop pre size counter tco = 
+        let val _ = send(tco, ("REQUEST_RNG", self())) 
+            val pid = receive [hn x => x]
+            val _ = send(tco, ("REQUEST_AUTH", self())) 
+            val auth = receive [hn x => x]
+        in case seqs of 
+        (x1::x2::x3::xs) => 
+            let val seqs_of_curr = seqs_of_seq (x2()) lengths
+                val args_and_leftovers = mapi (fn (i, x) =>
+                                        let val _ = send (pid, ("UPDATE_LS", (nth seqs_of_curr (i+1))))
+                                            val arg = x tco size
+                                            val _ = send (pid, ("REQUEST_LEFT", self()))
+                                            val left_overs = receive [hn x => x] 
+                                        in {arg = arg, left_overs = left_overs}
+                                        end) gens
+                val (test_args_rev, left_over_seqs_rev) = foldl (fn (x, (raws, left_overs)) => (x.arg::raws, x.left_overs::left_overs)) ([],[]) args_and_leftovers
+                val (test_args, left_over_seqs) = (reverse test_args_rev, reverse left_over_seqs_rev) 
+                val (is_sized_sequence, idx_of_sized, left_over_size, _) = foldl (fn (x,(bool, idx, len, count)) => if (length x > 0) 
+                                                                            then (true, count, (length x), (count+1))
+                                                                            else (bool, idx, len, (count+1))) (false, -1, 0, 0) left_over_seqs
+                
+                val (ret_seqs, args) = if is_sized_sequence 
+                                then shrink_sized_sequence seqs_of_curr gens prop pre size left_over_size idx_of_sized tco
+                                else (seqs_of_curr, test_args)
+                val precond_is_met = if (pre <> ()) then (apply_args pre args tco) else true 
+            in    
+                case (apply_args prop args tco) orelse (precond_is_met = false) of 
+                    true => internal_shrink_aux (x1::x3()) gens lengths prop pre size counter tco
+                    | false => internal_shrink ret_seqs gens prop pre size (counter+1) tco 
+            end 
+        | (x::xs) => 
+            let val seqs_of_curr = seqs_of_seq (x()) lengths
+                val test_args = mapi (fn (i, y) => 
+                                        let val _ = send (pid, ("UPDATE_LS", (nth seqs_of_curr (i+1))))
+                                            val arg = y tco size 
+                                            in arg end) gens
+                val precond_is_met = if (pre <> ()) then (apply_args pre test_args tco) else true
+            in  
+                case (apply_args prop test_args tco) orelse (precond_is_met = false) orelse (size < 0) of 
+                    true => 
+                        let val res = mapi (fn (i, y) => 
+                                        let val _ = send (pid, ("UPDATE_LS", (nth seqs_of_curr (i+1))))
+                                            val arg = y tco (size+1) 
+                                            in arg end) gens in 
+                        {shrunk_ctx = res, count = counter} end
+                    | false => internal_shrink_aux [x] gens lengths prop pre (size-1) counter tco
+                
+            end 
+        end
+
+    and internal_shrink sequences gens prop pre size counter tco = 
+        let val (seqs_comb, seq_lengths_rev) = foldl (fn (x, (seq, lengths)) => ((append seq x), ((length x) :: lengths))) ([], []) sequences
+            val seq_lengths = reverse seq_lengths_rev
+        in
+            if foldl (fn (x,y) => (x = 0) andalso y) true seqs_comb then 
+                internal_shrink_aux [fn () => seqs_comb] gens seq_lengths prop pre size counter tco
+            else  
+                let val decreased_seqs = dec_all seqs_comb
+                    val dec_seqs_w_root = (fn() => seqs_comb) :: decreased_seqs
+                    val res = internal_shrink_aux dec_seqs_w_root gens seq_lengths prop pre size (counter) tco
+                in 
+                res end
+        end
+    
+        fun random_shrink_aux sequences generators prop pre success size counter divi tco =
+            if (counter = 100) orelse (size = 0) then {count = success, size = size, sequences = sequences} else
+            let val _ = send(tco, ("REQUEST_RNG", self()))
+                val pid = receive [hn x => x]
+                val new_size = floor (size/divi)
+                val (shrunk_args_rev, shrunk_sequences_rev) = 
+                                            foldl (fn (x, (arg_acc, seq_acc)) => 
+                                                    let val arg = x tco new_size
+                                                        val _ = send (pid, ("REQUEST_SEQ", self()))
+                                                        val seq = receive [hn x => x]
+                                                    in (arg :: arg_acc, seq :: seq_acc) 
+                                                    end) ([],[]) generators
+                val (shrunk_args, shrunk_sequences) = (reverse shrunk_args_rev, reverse shrunk_sequences_rev)
+                val precond_is_met = if (pre <> ()) then (apply_args pre shrunk_args tco) else true 
+            in
+                case (apply_args prop shrunk_args tco) orelse (precond_is_met = false) of
+                    true => random_shrink_aux sequences generators prop pre success size (counter+1) (divi+2) tco
+                    | false =>
+                        random_shrink_aux shrunk_sequences generators prop pre (success+1) new_size (0) 2 tco
+            end
+
+        fun internal_shrinker sequence generators prop pre size counter tco = 
+            let val start_time = getTime()
+                val rng_recorder = spawn (fn() => rec_rng [])
+                val _ = send (tco, ("UPDATE_RNG", self(), rng_recorder))
+                val _ = receive [hn x => ()]
+                val res = random_shrink_aux sequence generators prop pre 0 size counter 2 tco
+                val rng_replayer = spawn (fn() => rep_rng [])
+                val _ = send (tco, ("UPDATE_RNG", self(), rng_replayer))
+                val _ = receive [hn x => ()]
+                val res = internal_shrink (res.sequences) generators prop pre res.size (res.count) tco
+                val end_time = getTime()
+            in 
+            (res, (end_time - start_time)) end
+    
+    fun test_shrinking stmt gens prop n = 
+        let fun aux acc 0 = acc 
+            | aux acc i = 
+                let val (_, ctx_seq, size, ctx) = troupecheck [stmt] authority 
+                    val _ = print i
+                    val inter_shrink_tco = spawn (fn() => init_tc authority ())
+                    val pre = ()
+                    val int_val = (internal_shrinker ctx_seq gens prop pre size 0 inter_shrink_tco).1
+                    val newAcc = int_val :: acc
+                    in aux newAcc (i-1)
+                    end
+        in 
+            aux [] n
+        end
+
+    (* Statements to choose from *)
+    fun program_shrink() = for_all ([program_gen], test_prog_shrink)
+    fun record_int_string_shrink() = for_all ([(record (["theInteger", "theString"], [integer(), string()]))], record_shrink_test)
+    fun two_strings_shrink() = for_all ([string(), string()], append_always_longer)
+    fun integer_list_shrink() = for_all ([list(integer())], my_sort_keep_length)
+    fun string_and_string_list_shrink() = for_all ([list(string()), string()], test_bad_insert)
+    fun float_and_one_of_shrink() = for_all ([float(), one_of [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]], float_one_of_bad_shrink)
+    fun even_numbers_shrink() = for_all ([even_number_gen], even_test)  
+
+    (* val test_prog = test_shrinking (program_shrink) [program_gen] test_prog_shrink 100 *)
+    (* val test_int_string = test_shrinking (record_int_string_shrink) [(record (["theInteger", "theString"], [integer(), string()]))] record_shrink_test 100 *)
+    (* val test_integer_list = test_shrinking (integer_list_shrink) [list(integer())] my_sort_keep_length 100 *)
+    (* val test_string_stringList = test_shrinking (string_and_string_list_shrink) [list(string()), string()] test_bad_insert 100 *)
+    (* val test_float_oneOf = test_shrinking (float_and_one_of_shrink) [float(), one_of [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]] float_one_of_bad_shrink 100 *)
+    val test_even_number = test_shrinking (even_numbers_shrink) [even_number_gen] even_test 100
+
+    fun sum [] acc = acc 
+    | sum (x::xs) acc =
+        sum xs (acc+x)
+
+    fun average ls = 
+        let val len = length ls 
+            val sum_ls = sum ls 0 
+        in (sum_ls/len)
+        end 
+in 
+    (* print "prog:";
+    print (test_prog) *)
+    (* print "int + string:";
+    print (test_int_string) *)
+    (* print "int list:";
+    print (test_integer_list) *)
+    (* print "string + string list:"; 
+    print (test_string_stringList) *)
+    (* print "float + one_of:";
+    print (test_float_oneOf) *)
+    print "even numbers:";
+    print (test_even_number)
+
+end

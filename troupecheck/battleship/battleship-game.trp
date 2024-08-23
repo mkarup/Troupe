@@ -1,0 +1,336 @@
+import lists 
+import timeout
+import troupecheck
+let fun make_row (f, i) = 
+        case i of 
+        0 => []
+        | _ => append (make_row (f, i-1)) [f i]
+
+    fun update_board board (x,y) marker = 
+        let val y_ls = nth board y
+            val new_y = make_row ((fn i => if (i = x) then marker else (nth y_ls i)), 10)                                
+            val new_board = make_row ((fn i => if i = y then new_y else (nth board i)), 10) 
+        in new_board 
+        end 
+    
+    fun check_attack board (x,y) = 
+        if (x > 10) orelse (y > 10) orelse (x < 1) orelse (y < 1) then "Illegal coordinate"
+        else 
+            let val coord = nth (nth board y) x 
+            in case coord of 
+            "-" => "Miss"
+            |"O" => "Illegal coordinate"
+            |"X" => "Illegal coordinate"
+            |_ => "Hit"
+            end
+    
+    fun update_ship ship (x,y) = 
+        let val res = foldl (fn (z,w) => if z = (x,y) then w else append w [z]) [] ship
+        in res 
+        end
+
+
+    fun update_ships ships (x,y) = 
+        let val interim_ships = map (fn z => update_ship z (x,y)) ships
+            val res =  foldl (fn (z,w) => if (length z) = 0 then w else (append w [z])) [] interim_ships
+        in res
+        end
+
+
+    fun do_attack board ships (x,y) = 
+        case check_attack board (x,y) of 
+        "Illegal coordinate" => ("Illegal coordinate", board, ships)
+        | "Miss" => 
+            let val updated_board = (update_board board (x,y) "O")
+            in ("Miss", updated_board, ships)
+            end
+        | "Hit" => 
+            let val updated_board = (update_board board (x,y) "X")
+                val updated_ships = (update_ships ships (x,y))
+            in ("Hit", updated_board, updated_ships)
+            end
+    
+    fun switch_turn turn = 
+        if turn = 1 then 2 else 1
+    
+    fun declassify_board board = 
+        let val _ = blockdecl authority
+            val board_decl = (declassify(board, authority, `{}`))
+            val res = map (fn x => 
+                                let val x_decl = (declassify(x, authority, `{}`))
+                                    in map (fn y => 
+                                                declassify(y, authority, `{}`)) x_decl
+                                    end) board_decl
+        in res 
+        end
+            
+
+    fun game p1 p2 turn =
+        let val player_in = if turn = 1 then p1 else p2
+            val player_out = if turn = 1 then p2 else p1
+            val _ = send(player_in.id, ("YOURTURN", self()))
+        in 
+        receive [hn (("ATTACK", x), senderid) => 
+                    let val (msg, new_board, new_ships) = do_attack player_out.board player_out.ships x 
+                        val _ = blockdecl authority
+                        val msg_decl = declassify (msg, authority, `{}`)
+                        val ships_decl = declassify (new_ships, authority, `{}`)
+                        val board_decl = declassify_board new_board (* (new_board, authority, `{}`) *)
+                        val next_turn = if msg_decl = "Illegal coordinate" then turn else switch_turn turn
+                        in if length ships_decl = 0 then 
+                            let val _ = send (senderid, "YOUWON")
+                                val _ = send (player_out.id, ("YOULOST", board_decl, x))
+                            in exitAfterTimeout authority 10 0 "Game has ended."
+                            end
+                        else 
+                            let val _ = send (senderid, (("ATTACK_RESP", msg_decl), self()))
+                                val _ = send (player_out.id, ("UPDATE_MSG", x, msg_decl, board_decl))
+                            in if turn = 2 
+                                then game {p1 with board = new_board, ships = new_ships} p2 next_turn 
+                                else game p1 {p2 with board = new_board, ships = new_ships} next_turn
+                            end
+                        end
+                ]
+        end
+    
+    val _ = register ("battleship", self(), authority)
+
+    fun setup p1 count = 
+        receive [hn ("JOINING", board, ships, senderid) => 
+                    case count of 
+                     1 =>
+                        let val p2 = {board = (board raisedTo `{p2}`), id = senderid, ships = (ships raisedTo `{p2}`)}
+                            val _ = send (p1.id, ("STARTING", 1))
+                            val _ = send (p2.id, ("STARTING", 2)) 
+                        in game p1 p2 1
+                        end
+                    |0 => 
+                        setup {board = (board raisedTo `{p1}`), id = senderid, ships = (ships raisedTo `{p1}`)} (count+1)]
+    
+(* 
+----------------------------
+Testing the game host using TroupeCheck
+----------------------------
+*)
+    fun for_i body acc 0 = acc.0 
+    | for_i body acc to = for_i body (body acc) (to-1)
+
+    fun bound_from_ship ship = 
+        case ship of 
+        "C" => 5
+        | "B" => 4
+        | "S" => 3 
+        | "D" => 2
+
+    fun update_board_creation board_or_error coordinate = 
+        case getType board_or_error of 
+        "string" => board_or_error
+        | _ => 
+            let fun place_horizontal (x, y) ship_type board = 
+                    let val y_ls = nth board y
+                        val upperbound = x + (bound_from_ship ship_type)
+                        val is_valid = (x >= 1) andalso (upperbound <= 11)
+                    in if is_valid then 
+                            let val new_y = make_row ((fn i => if (i >= x) andalso (i < upperbound) then ship_type else (nth y_ls i)), 10)                                
+                                val new_board = make_row ((fn i => if i = y then new_y else (nth board i)), 10) 
+                            in new_board 
+                            end 
+                        else
+                            ("Invalid coordinates for ship of type: " ^ ship_type)
+                    end 
+
+                fun place_vertical (x, y) ship_type board = 
+                    let val upperbound = y + (bound_from_ship ship_type)
+                        val is_valid = (x >= 1) andalso (upperbound <= 11)
+                    in if is_valid then 
+                            let val new_board = make_row ((fn i => 
+                                                            if i >= y andalso i < upperbound then 
+                                                                make_row ((fn j => if j = x then ship_type else nth (nth board i) j), 10)
+                                                            else nth board i), 10)
+                            in new_board 
+                            end 
+                        else
+                            ("Invalid coordinates for ship of type: " ^ ship_type)
+                    end 
+                val ((x,y), direction, ship) = coordinate
+            in case direction of
+                "v" => place_vertical (x,y) ship board_or_error
+                | "h" => place_horizontal (x,y) ship board_or_error
+            end
+
+    fun ship_coords_from_info info = 
+        let val (org_x, org_y) = info.0
+            val count = (bound_from_ship info.2)-1
+        in case info.1 of
+        "h" =>  
+            let val coords = for_i (fn acc => (append acc.0 [((acc.1)+1, org_y)], (acc.1)+1)) ([info.0], org_x) count
+            in coords 
+            end 
+        |"v" => 
+            let val coords = for_i (fn acc => (append acc.0 [(org_x, (acc.1)+1)], (acc.1)+1)) ([info.0], org_y) count
+            in coords 
+            end 
+        end
+
+    fun make_board ls = 
+        let val start_board = make_row ((fn _ => make_row ((fn _ => "-"), 10)), 10)
+            val (board, ships) = foldl (fn (x,(board_acc, ships_acc)) => (update_board_creation board_acc x, append ships_acc [ship_coords_from_info x])) (start_board, []) ls 
+        in  
+            (board, ships)
+        end
+    
+    fun remove_elem elem [] = []
+    | remove_elem elem (x::xs) =
+        if elem = x then 
+            xs
+        else
+            x :: (remove_elem elem xs)  
+
+
+    fun remove_available_coords available_coords coords (x,y) dir length = 
+        let val to_remove = 
+            case dir of 
+            "h" => 
+                let val to_remove_interim = for_i (fn (ls, count) => (append ls [(count, y)], (count-1))) (coords, (x-1)) (length-1)
+                    in foldl (fn (c, acc) => 
+                                            let val interim_x = c.0
+                                                val interim_y = c.1
+                                                val new_ls = 
+                                                    for_i (fn (ls, count) => 
+                                                            (append ls [(interim_x, (interim_y-count))], (count+1))) ([], 1) (length-1)
+                                                in append acc new_ls end) to_remove_interim coords
+                    end
+                    
+            | "v" => 
+                let val to_remove_interim = for_i (fn (ls, count) => (append ls [(x, count)], (count-1))) (coords, (y-1)) (length-1)
+                    in foldl (fn (c, acc) => 
+                                            let val interim_x = c.0
+                                                val interim_y = c.1
+                                                val new_ls = 
+                                                    for_i (fn (ls, count) => 
+                                                            (append ls [((interim_x-count), interim_y)], (count+1))) ([], 1) (length-1)
+                                                in append acc new_ls end) to_remove_interim coords
+                    end
+        val new_available = foldl (fn (x, y) => remove_elem x y) available_coords to_remove
+        in 
+            new_available 
+        end
+
+    fun ship_gen available_coords ship_type tco size = 
+        let val dir = one_of ["h", "v"] tco size 
+            val (coord, coords) = case dir of 
+                "h" =>
+                    let val avail = 
+                        case ship_type of 
+                        "C" => 
+                            available_coords.c_h
+                        | "B" => 
+                            available_coords.b_h
+                        | "S" => 
+                            available_coords.s_h
+                        | "D" => 
+                            available_coords.d_h
+                        val coord = one_of avail tco size 
+                        val coords = ship_coords_from_info (coord, "h", ship_type)
+                    in (coord, coords)
+                    end
+                | "v" => 
+                    let val avail = 
+                        case ship_type of 
+                        "C" => 
+                            available_coords.c_v
+                        | "B" => 
+                            available_coords.b_v
+                        | "S" => 
+                            available_coords.s_v
+                        | "D" => 
+                            available_coords.d_v
+                        val coord = one_of avail tco size 
+                        val coords = ship_coords_from_info (coord, "v", ship_type)
+                    in (coord, coords)
+                    end
+
+            val newC_h = remove_available_coords available_coords.c_h coords coord dir 5
+            val newC_v = remove_available_coords available_coords.c_v coords coord dir 5
+            val newB_h = remove_available_coords available_coords.c_h coords coord dir 4
+            val newB_v = remove_available_coords available_coords.c_v coords coord dir 4
+            val newS_h = remove_available_coords available_coords.c_h coords coord dir 3
+            val newS_v = remove_available_coords available_coords.c_v coords coord dir 3
+            val newD_h = remove_available_coords available_coords.c_h coords coord dir 2
+            val newD_v = remove_available_coords available_coords.c_v coords coord dir 2
+        in ((coord, dir, ship_type), {c_h = newC_h, c_v = newC_v, b_h = newB_h, b_v = newB_v, d_h = newS_h, s_h = newS_h, s_v = newS_v, d_h = newD_h, d_v = newD_v})
+        end
+        
+    fun make_init_avail_rec () = 
+        let fun remove_elem_xs elem [] = []
+            | remove_elem_xs elem (x::xs) =
+                if (elem = (x.0)) then 
+                    remove_elem_xs elem xs
+                else
+                    x :: (remove_elem_xs elem xs)  
+            
+            fun remove_elem_ys elem [] = []
+            | remove_elem_ys elem (x::xs) =
+                if (elem = (x.1)) then 
+                    remove_elem_ys elem xs
+                else
+                    x :: (remove_elem_ys elem xs) 
+            
+            val init = for_i (fn (acc, x_count) => 
+                                let val list = for_i (fn (acc, y_count) => (append acc [(x_count, y_count)], (y_count+1))) ([], 1) 10 
+                                in (append acc list, (x_count+1))
+                                end) ([], 1) 10
+            val c_h = foldl (fn(x,y) => remove_elem_xs x y) init [7, 8, 9, 10]
+            val c_v = foldl (fn(x,y) => remove_elem_ys x y) init [7, 8, 9, 10]
+            val b_h = foldl (fn(x,y) => remove_elem_xs x y) init [8, 9, 10]
+            val b_v = foldl (fn(x,y) => remove_elem_ys x y) init [8, 9, 10]
+            val s_h = foldl (fn(x,y) => remove_elem_xs x y) init [9, 10]
+            val s_v = foldl (fn(x,y) => remove_elem_ys x y) init [9, 10]
+            val d_h = foldl (fn(x,y) => remove_elem_xs x y) init [10]
+            val d_v = foldl (fn(x,y) => remove_elem_ys x y) init [10]
+        in {c_h, c_v, b_h, b_v, s_h, s_v, d_h, d_v}
+        end
+
+
+    fun board_ships_gen tco size = 
+        let val init_avail = make_init_avail_rec ()
+            val (carrier, avail1) = ship_gen init_avail "C" tco size  
+            val (battleshp, avail2) = ship_gen avail1 "B" tco size
+            val (sub1, avail3) = ship_gen avail2 "S" tco size
+            val (sub2, avail4) = ship_gen avail3 "S" tco size
+            val (destroyer, _) = ship_gen avail4 "D" tco size
+            val ship_ls = [carrier, battleshp, sub1, sub2, destroyer]
+            val (board, ships) = make_board ship_ls
+        in
+        (board, ships)
+        end
+    
+    fun attack_gen tco size = 
+        let val res = (integer(1, 10) tco size, integer(1,10) tco size)
+        in 
+            res
+        end
+
+    fun test_do_attack_no_leak (board, ships) attack = 
+        let val interim_res1 = ((levelOf board) = (levelOf ships)) 
+            val interim_res2 = ((levelOf board) = (levelOf (do_attack board ships attack)))
+        in (interim_res1 andalso interim_res2)
+        end 
+    
+    fun random_labels_gen val_gen tco size = 
+        let val labels = list(label()) tco size 
+            val res = combined_labeled_value (labels, val_gen) tco size 
+        in res 
+        end
+    
+    fun test_bad_do_attack (board, ships) attack = 
+        (length (do_attack board ships attack).1) = 11
+
+    fun prop_do_att_test() = 
+        for_all ([(random_labels_gen board_ships_gen), attack_gen], test_do_attack_no_leak)
+    
+    fun prop_bad_do_att() = 
+        for_all ([(labeled_value ([`{alice}`, `{bob}`], board_ships_gen)), attack_gen], test_bad_do_attack)
+    
+in setup () 0
+end

@@ -1,0 +1,170 @@
+import lists
+import troupecheck
+(* This file is for testing what causes TroupeChecks slow overhead, 
+   by timing the apply args function, and the foldl call that generates the arguments. *)
+let fun bool_commutative x y = 
+        (x andalso y) = (y andalso x)
+    val bool_test_gens = [boolean(), boolean()]
+    
+    fun tuple_test (number, string) = 
+        getType number = "number"
+
+    val tup_test_gens = [tuple([integer(), string()])]
+
+    val gens_to_use = bool_test_gens 
+    val test_to_use = bool_commutative
+    fun init_tc auth rng =  
+        receive [hn ("REQUEST_RNG", senderid) => 
+                    let val _ = send (senderid, rng) 
+                    in init_tc auth rng end,
+
+                hn ("REQUEST_AUTH", senderid) => 
+                    let val _ = send (senderid, auth) 
+                    in init_tc auth rng end,
+
+                hn ("UPDATE_RNG", senderid, new_rng) => 
+                    let val _ = send(senderid, "done") in
+                    init_tc auth new_rng end]
+
+    fun rec_rng ls =
+        receive [hn ("REQUEST_RND", senderid) =>
+                    let val rnd = random()
+                        val _ = send (senderid, rnd) 
+                        in rec_rng (rnd :: ls)
+                        end, 
+                hn ("REQUEST_SEQ", senderid) => 
+                    let val _ = send (senderid, (reverse ls))
+                    in rec_rng []
+                    end]
+    val recorder = spawn(fn() => rec_rng [])
+    val tcp = spawn(fn() => init_tc authority recorder)
+
+    fun boolean_check x tco = 
+        if (getType x)<>"boolean" then () else ()
+
+    fun function_not_done_check p tco = 
+        if (getType p)<>"function" then () else ()
+
+    fun apply_args p l tco =
+        let val _ = send (tco, ("REQUEST_AUTH", self()))
+            val auth = receive [hn x => x]
+        in case l of 
+            [] =>  (* this case is only reached if there are no generators to begin with *)
+                let val _ = boolean_check (p()) tco
+                    val res = p() 
+                    val _ = blockdecl auth 
+                in declassify (res, auth, `{}`) 
+                end
+            | (x::xs) => 
+                let val res = foldl (fn (x,y) => function_not_done_check y tco; y x) p l
+                    val _ = boolean_check res tco
+                    val _ = blockdecl auth
+                in declassify (res, auth, `{}`)
+            end
+        end
+    
+    fun sum [] acc = acc 
+    | sum (x::xs) acc =
+        sum xs (acc+x)
+    
+    fun average ls = 
+        let val len = length ls 
+            val sum_ls = sum ls 0 
+        in (sum_ls/len)
+        end
+    
+    fun handle_inner_timings timings = 
+        let val (arg, rec, ap_ac, ap_seq) = timings
+            val arg_avrg = average arg 
+            val rec_avrg = average rec
+            val ap_ac_avrg = average ap_ac
+            val ap_seq_avrg = average ap_seq
+        in (arg_avrg, rec_avrg, ap_ac_avrg, ap_seq_avrg)
+        end
+    
+    fun append_inner_timings to_append to = 
+        let val (a1, b1, c1, d1) = to 
+            val (a2, b2, c2, d2) = to_append 
+            val a3 = append a1 [a2]
+            val b3 = append b1 [b2]
+            val c3 = append c1 [c2]
+            val d3 = append d1 [d2] 
+        in (a3, b3, c3, d3)
+        end
+    
+    fun sum_inner_timings timings = 
+        let val (a1, b1, c1, d1) = timings
+            val a2 = sum a1
+            val b2 = sum b1
+            val c2 = sum c1
+            val d2 = sum d1
+        in (a2, b2, c2, d2)
+        end
+    
+    fun test_troupecheck_inner(gen_ts, app_ts, inner_timings, 101) = (gen_ts, app_ts, inner_timings)
+    | test_troupecheck_inner (gen_ts, app_ts, inner_timings, n) = 
+        let val generators = gens_to_use
+            val start_gen = getTime()
+            val (args, sequences, times) = foldl (fn (x, (arg_acc, seq_acc, (arg_t, rec_t, ap_ac_t, ap_seq_t))) => 
+                                                    let val arg_start = getTime()
+                                                        val arg = x tcp n
+                                                        val arg_end = getTime()
+                                                        val _ = send (recorder, ("REQUEST_SEQ", self()))
+                                                        val rec_start = getTime()
+                                                        val seq = receive [hn x => x]
+                                                        val rec_end = getTime()
+                                                        val ap_ac_start = getTime()
+                                                        val new_args = append arg_acc [arg]
+                                                        val ap_ac_end = getTime()
+                                                        val ap_seq_start = getTime()
+                                                        val new_seqs = append seq_acc [seq]
+                                                        val ap_seq_end = getTime()
+                                                        val new_arg_t = append arg_t [arg_end - arg_start]
+                                                        val new_rec_t = append rec_t [rec_end - rec_start]
+                                                        val new_ap_ac_t = append ap_ac_t [ap_ac_end - ap_ac_start]
+                                                        val new_ap_seq_t = append ap_seq_t [ap_seq_end - ap_seq_start]
+                                                    in (new_args, new_seqs, (new_arg_t, new_rec_t, new_ap_ac_t, new_ap_seq_t)) 
+                                                    end) ([],[], ([], [], [], [])) generators
+            val end_gen = getTime()
+            val inner_timings_avrg = handle_inner_timings times
+            val new_inner_timings = append_inner_timings inner_timings_avrg inner_timings
+            val start_app = getTime()
+            val _ = apply_args test_to_use args tcp
+            val end_app = getTime()
+        in test_troupecheck_inner(append gen_ts [end_gen-start_gen], append app_ts [end_app - start_app], new_inner_timings, (n+1))
+        end
+    
+    fun print_inners inners = 
+        let val (a1, b1, c1, d1) = inners
+            val _ = print "arg generation:"
+            val _ = print a1
+            val _ = print "recive seq:"
+            val _ = print b1
+            val _ = print "append arg:"
+            val _ = print c1
+            val _ = print "append sequence:"
+            val _ = print d1 
+        in () 
+        end
+    
+    fun test_troupecheck(ls1,ls2, inners, 0) = (ls1,ls2, inners)
+    | test_troupecheck(ls1,ls2, inners, n) = 
+        let val (gens, apps, timings) = test_troupecheck_inner([], [], ([], [], [], []), 0)
+            val gen_sum = sum gens 0
+            val apps_sum = sum apps 0
+            val avrg_inners = handle_inner_timings timings
+            val new_inners = append_inner_timings avrg_inners inners
+        in test_troupecheck(append ls1 [gen_sum], append ls2 [apps_sum], new_inners, (n-1))
+        end
+    val (gens, apps, inner_timings) = test_troupecheck([], [],([], [], [], []), 100)
+    val avrg_timings = handle_inner_timings inner_timings
+in 
+    print "generating total:";
+    print (average gens); 
+    print "applying args:"; 
+    print (average apps); 
+    print_inners avrg_timings
+end
+
+            
+
