@@ -96,7 +96,6 @@ export class Scheduler implements SchedulerInterface {
     }
     
     notifyMonitors (status = TerminationStatus.OK, errstr = null) {
-        let mkVal = this.__currentThread.mkVal
         let ids = Object.keys (this.__currentThread.monitors);
         for ( let i = 0; i < ids.length; i ++ ) {            
             let id = ids[i];
@@ -105,8 +104,8 @@ export class Scheduler implements SchedulerInterface {
             let thisPid = this.__currentThread.tid;
             let statusVal = this.__currentThread.mkVal ( status ) ;
             let reason = TerminationStatus.OK == status ? statusVal : 
-                mkTuple ( [statusVal,  mkVal (errstr)] );
-            let message = mkVal (mkTuple ([ mkVal("DONE"), refUUID, thisPid, reason]))             
+                this.__currentThread.mkVal (mkTuple ( [statusVal,  this.__currentThread.mkVal (errstr)] ));
+            let message = this.__currentThread.mkVal (mkTuple ([ this.__currentThread.mkVal("DONE"), refUUID, thisPid, reason]))
             this.rtObj.sendMessageNoChecks ( toPid, message , false) // false flag means no need to return in the process
         }
     }
