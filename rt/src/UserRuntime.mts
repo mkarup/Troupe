@@ -30,6 +30,7 @@ import { BuiltinService } from './builtins/service.mjs'
 import { BuiltinString } from './builtins/string.mjs'
 import { BuiltinRecordReflection } from './builtins/recordReflection.mjs'
 import { BuiltinTypeInformation } from './builtins/types.mjs'
+import { BuiltinLink } from './builtins/link.mjs'
 
 let BuiltSpawnSendReceive = x => BuiltinSpawn(BuiltinSend(BuiltinReceive(x)))
 
@@ -62,5 +63,6 @@ export const UserRuntime =
     BuiltinMath(
     BuiltinRecordReflection(
     BuiltinTypeInformation(
-    BuiltinStdIo(UserRuntimeZero)    
-    ))))))))))))))))))))))))))))
+    BuiltinStdIo(
+    BuiltinLink(UserRuntimeZero)
+    )))))))))))))))))))))))))))))
