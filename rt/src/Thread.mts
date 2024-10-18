@@ -1,5 +1,6 @@
 import * as levels from './options.mjs'
-import { LVal, LValCopyAt } from './Lval.mjs';
+import { LVal, LValCopyAt, listStringRep } from './Lval.mjs';
+import { mkTuple } from './ValuesUtil.mjs';
 import { HandlerError, ImplementationError, StrThreadError } from './TroupeError.mjs';
 import yargs from 'yargs';
 let logLevel = yargs.argv.debug? 'debug' : 'info'
@@ -17,7 +18,7 @@ import { Level } from './Level.mjs';
 import { SchedulerInterface } from './SchedulerInterface.mjs';
 import { getRuntimeObject } from './SysState.mjs';
 import { HnState } from './SandboxStatus.mjs';
-
+import { __nodeManager } from './NodeManager.mjs'
 
 let isPiniMode = yargs.argv.pini?true:false;
 
@@ -89,7 +90,6 @@ class  MboxClearance {
 
   
 }
-
 
 class Mailbox extends Array {
     mclear : MboxClearance ;
@@ -199,6 +199,9 @@ export class Thread {
     pini_uuid : string;
 
     handlerState: HnState;
+    exitSignalQueue: any [];
+    trapExitSignals: boolean = false;
+    linkSet: {};
     monitors: {};
     killCounter: number;
     // sleeping: boolean;
@@ -231,6 +234,9 @@ export class Thread {
         this.bl = levblock;
         this.pini_uuid = null;
         this.handlerState = handlerState;
+        this.exitSignalQueue = [];
+        this.trapExitSignals = false;
+        this.linkSet = {};
         this.monitors = {};
         this.killCounter = 0;
         this.sleepTimeout = null; // no sleep command        
@@ -354,6 +360,11 @@ export class Thread {
     }
 
     
+    addLink (pid) {
+        if (!this.linkSet[pid.val]) {
+            this.linkSet[pid.val] = pid
+        }
+    }
 
 
     addMonitor (pid, r) {        
@@ -728,6 +739,39 @@ export class Thread {
     addMessage (message) {
         this.mailbox.newMessage (message);    
     }
+
+    addExitSignal (lSenderPid, lReason) {
+        this.exitSignalQueue.push ([lSenderPid, lReason]);
+    }
+
+    processExitSignals () {
+        const isNormal = ((reason) => reason.isTuple && reason.length == 1 && reason[0].val === "normal");
+        const isKill = ((reason) => reason.isTuple && reason.length == 1 && reason[0].val === "kill");
+        while (0 < this.exitSignalQueue.length) {
+            const [lSenderPid, lReason] = this.exitSignalQueue.pop();
+            let reason = lReason.val;
+            if (isKill(reason)) {
+                console.log("Received untrappable exit");
+                if (this.linkSet[lSenderPid.val]) {
+                    delete this.linkSet[lSenderPid.val];
+                }
+            } else if (this.trapExitSignals) {
+                let msg = new LVal(mkTuple ([new LVal("EXIT", lReason.lev), lReason]), lReason.lev);
+                const nodeId = new LVal(__nodeManager.getNodeId(), lReason.lev);
+                this.rtObj.__mbox.addMessage(nodeId, this.tid, msg, lReason.lev);
+                if (this.linkSet[lSenderPid.val]) {
+                    delete this.linkSet[lSenderPid.val];
+                }
+            } else if (!isNormal(reason)) {
+                console.log(`Received abnormal exit signal with reason ${lReason.stringRep()} from ${lSenderPid.val}`);
+                if (this.linkSet[lSenderPid.val]) {
+                    delete this.linkSet[lSenderPid.val];
+                }
+            }
+        }
+        return true;
+    }
+    
 
     raiseMboxClearance (new_lclear: any) {        
         /*

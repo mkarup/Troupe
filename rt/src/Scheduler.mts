@@ -26,6 +26,8 @@ let TerminationStatus = {
     ERR: 1
 }
 
+const NormalExitReason = "normal";
+
 export class Scheduler implements SchedulerInterface {
     rt_uuid: any;
     __funloop: Thread[];
@@ -72,6 +74,7 @@ export class Scheduler implements SchedulerInterface {
     }
 
     done  ()  {            
+        this.notifyLinkSet(NormalExitReason);
         this.notifyMonitors();
         // console.log (this.__currentThread.processDebuggingName, this.currentThreadId.val.toString(), "done")
         delete this.__alive [this.currentThreadId.val.toString()];              
@@ -84,6 +87,7 @@ export class Scheduler implements SchedulerInterface {
                                lub(this.__currentThread.bl, this.__currentThread.r0_lev),
                                lub(this.__currentThread.bl, this.__currentThread.r0_tlev))
 
+        this.notifyLinkSet(NormalExitReason);
         this.notifyMonitors ();
 
         delete this.__alive[this.currentThreadId.val.toString()];            
@@ -93,6 +97,27 @@ export class Scheduler implements SchedulerInterface {
             console.log ("Saved the result value in file", persist)
         }
         return null;
+    }
+
+    notifyLinkSet (...reason: any[]) {
+        let ids = Object.keys (this.__currentThread.linkSet);
+        if (!ids.length) {
+            return
+        }
+        let rs: LVal[] = [];
+        for (const r of reason) {
+            let r_ = r instanceof LVal ? r : this.__currentThread.mkVal(r);
+            rs.push(r_);
+        }
+        // const mkVal = ((v) => );
+        // console.log(`pc = ${this.__currentThread.pc.stringRep()}, bl = ${this.__currentThread.bl.stringRep()}`);
+        const reasonVal = this.__currentThread.mkVal (mkTuple (rs));
+        for (let i = 0; i < ids.length; i++) {
+            let id = ids[i];
+            let toPid = this.__currentThread.linkSet[id];
+            let fromPid = this.__currentThread.tid;
+            this.rtObj.sendExitSignal (toPid, fromPid, reasonVal, false);
+        }
     }
     
     notifyMonitors (status = TerminationStatus.OK, errstr = null) {
@@ -238,6 +263,8 @@ export class Scheduler implements SchedulerInterface {
 
 
     stopThreadWithErrorMessage (t:Thread, s:string ) {
+        // console.log(`pc = ${t.pc.stringRep()}, bl = ${t.bl.stringRep()}`);
+        this.notifyLinkSet(TerminationStatus.ERR, s) ;
         this.notifyMonitors(TerminationStatus.ERR, s) ;
         delete this.__alive [t.tid.val.toString()];
     }
@@ -268,6 +295,9 @@ export class Scheduler implements SchedulerInterface {
             for (let $$loopiter = 0; $$loopiter < $$LOOPBOUND && _FUNLOOP.length > 0; $$loopiter ++ ) {
                 _curThread = _FUNLOOP.shift();
                 this.__currentThread = _curThread;
+                if (!_curThread.processExitSignals()) {
+                    continue;
+                }
                 dest = _curThread.next 
                 let ttl = 1000;  // magic constant; 2021-04-29
                 while (dest && ttl -- ) {

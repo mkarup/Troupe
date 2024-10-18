@@ -240,8 +240,25 @@ function rt_sendMessageNochecks(lRecipientPid, message, ret = true) {
   }
 }
 
-
-
+function rt_sendExitSignal(lRecipientPid, lSenderPid, lReason, ret = true) {
+    let recipientPid = lRecipientPid.val;
+    if (isLocalPid(recipientPid)) {
+        console.log (`Sending exit signal with reason ${lReason.stringRep()} to ${recipientPid}`);
+        if (__sched.isAlive(lRecipientPid)) {
+            let t = __sched.getThread(lRecipientPid);
+            // console.log (recipientPid.toString())            
+            // t.processSignal (signal, lSenderPid);
+            t.addExitSignal (lSenderPid, lReason);
+            __sched.unblockThread(lRecipientPid);
+            if (ret) {
+                return $t().returnImmediateLValue(__unit);
+            }
+        }
+    } else {
+        console.log ("Remote signals note implemented");
+        return $t().returnImmediateLValue(__unit);
+    }
+}
 
 let rt_debug = function (s) {
   function formatToN(s, n) {
@@ -335,6 +352,7 @@ class RuntimeObject implements RuntimeInterface {
   rt_mkuuid = rt_mkuuid
   mkLabel = rt_mkLabel
   sendMessageNoChecks = rt_sendMessageNochecks;
+  sendExitSignal = rt_sendExitSignal;
   cleanup = cleanupAsync
   persist(obj, path) {
     let jsonObj = serialize(obj, $t().pc).data;

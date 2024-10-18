@@ -329,7 +329,8 @@ instance WellFormedIRCheck IRExpr where
                      , "toString"
                      , "whereis"
                      , "link"
-                                      
+                     , "trap_exits"
+                     , "exitp"
                      ]
         then return ()
         else throwError $ "bad base function: " ++ fname
