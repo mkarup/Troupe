@@ -11,7 +11,7 @@ let lub = levels.lub;
 let flowsTo = levels.flowsTo
 import { v4 as uuidv4} from 'uuid'
 
-import { TroupeType } from './TroupeTypes.mjs'
+import { TroupeType, getTroupeType } from './TroupeTypes.mjs'
 import { RuntimeInterface } from './RuntimeInterface.mjs';
 import { __unit } from './UnitVal.mjs';
 import { Level } from './Level.mjs';
@@ -745,16 +745,13 @@ export class Thread {
     }
 
     processExitSignals () {
-        const isNormal = ((reason) => reason.isTuple && reason.length == 1 && reason[0].val === "normal");
-        const isKill = ((reason) => reason.isTuple && reason.length == 1 && reason[0].val === "kill");
+        const isNormal = ((reason) => reason.troupeType == TroupeType.STRING && reason.val === "normal");
+        const isKill = ((reason) => reason.troupeType == TroupeType.STRING && reason.val === "kill");
         while (0 < this.exitSignalQueue.length) {
             const [lSenderPid, lReason] = this.exitSignalQueue.pop();
-            let reason = lReason.val;
-            if (isKill(reason)) {
+            if (isKill(lReason)) {
                 console.log("Received untrappable exit");
-                if (this.linkSet[lSenderPid.val]) {
-                    delete this.linkSet[lSenderPid.val];
-                }
+                return this.mkVal("killed");
             } else if (this.trapExitSignals) {
                 let msg = new LVal(mkTuple ([new LVal("EXIT", lReason.lev), lReason]), lReason.lev);
                 const nodeId = new LVal(__nodeManager.getNodeId(), lReason.lev);
@@ -762,14 +759,12 @@ export class Thread {
                 if (this.linkSet[lSenderPid.val]) {
                     delete this.linkSet[lSenderPid.val];
                 }
-            } else if (!isNormal(reason)) {
+            } else if (!isNormal(lReason)) {
                 console.log(`Received abnormal exit signal with reason ${lReason.stringRep()} from ${lSenderPid.val}`);
-                if (this.linkSet[lSenderPid.val]) {
-                    delete this.linkSet[lSenderPid.val];
-                }
+                return lReason;
             }
         }
-        return true;
+        return null;
     }
     
 

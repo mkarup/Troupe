@@ -12,14 +12,15 @@ export function BuiltinLink<TBase extends Constructor<UserRuntimeZero>>(Base: TB
             assertIsProcessId(larg);
 
             if (!this.runtime.__sched.isAlive(larg)) {
-                console.log (`${larg.val} is not alive`)
+                console.log (`TODO: handle when linkee is not alive (${larg.val} is not alive)`)
             } else {
                 let linkeeTid = larg;
                 let linkerTid = this.runtime.$t.tid;
                 console.log (`Linking ${linkeeTid.val} with ${linkerTid.val}`);
                 
                 let linkee = this.runtime.__sched.__alive[linkeeTid.val.toString()];
-                
+
+                // Bidirectional
                 linkee.addLink (linkerTid);
                 this.runtime.$t.addLink (linkeeTid);
             }
@@ -41,11 +42,9 @@ export function BuiltinLink<TBase extends Constructor<UserRuntimeZero>>(Base: TB
                 let toPid = arg[0];
                 let fromPid = this.runtime.$t.tid;
                 let reason = arg[1] instanceof LVal ? arg[1] : this.runtime.$t.mkVal(arg[1]);
-                if (!(reason instanceof Array)) {
-                    reason = this.runtime.$t.mkVal (mkTuple ([reason]));
-                }
                 this.runtime.sendExitSignal (toPid, fromPid, reason, false);
             } else {
+                console.log (`TODO: Handle when process calls exit on itself explicitly`);
             }
             return this.runtime.ret(__unit);
         }, "exitp");

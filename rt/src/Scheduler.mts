@@ -104,14 +104,17 @@ export class Scheduler implements SchedulerInterface {
         if (!ids.length) {
             return
         }
-        let rs: LVal[] = [];
-        for (const r of reason) {
-            let r_ = r instanceof LVal ? r : this.__currentThread.mkVal(r);
-            rs.push(r_);
+        let reasonVal: LVal;
+        if (1 < reason.length) {            
+            let rs: LVal[] = [];
+            for (const r of reason) {
+                let r_ = r instanceof LVal ? r : this.__currentThread.mkVal(r);
+                rs.push(r_);
+            }
+            reasonVal = this.__currentThread.mkVal (mkTuple (rs));
+        } else {
+            reasonVal = reason[0] instanceof LVal ? reason[0] : this.__currentThread.mkVal(reason[0]);
         }
-        // const mkVal = ((v) => );
-        // console.log(`pc = ${this.__currentThread.pc.stringRep()}, bl = ${this.__currentThread.bl.stringRep()}`);
-        const reasonVal = this.__currentThread.mkVal (mkTuple (rs));
         for (let i = 0; i < ids.length; i++) {
             let id = ids[i];
             let toPid = this.__currentThread.linkSet[id];
@@ -295,7 +298,10 @@ export class Scheduler implements SchedulerInterface {
             for (let $$loopiter = 0; $$loopiter < $$LOOPBOUND && _FUNLOOP.length > 0; $$loopiter ++ ) {
                 _curThread = _FUNLOOP.shift();
                 this.__currentThread = _curThread;
-                if (!_curThread.processExitSignals()) {
+                const e = _curThread.processExitSignals();
+                if (e) {
+                    this.notifyLinkSet(e);
+                    delete this.__alive [_curThread.tid.val.toString()];
                     continue;
                 }
                 dest = _curThread.next 

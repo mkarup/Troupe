@@ -246,8 +246,6 @@ function rt_sendExitSignal(lRecipientPid, lSenderPid, lReason, ret = true) {
         console.log (`Sending exit signal with reason ${lReason.stringRep()} to ${recipientPid}`);
         if (__sched.isAlive(lRecipientPid)) {
             let t = __sched.getThread(lRecipientPid);
-            // console.log (recipientPid.toString())            
-            // t.processSignal (signal, lSenderPid);
             t.addExitSignal (lSenderPid, lReason);
             __sched.unblockThread(lRecipientPid);
             if (ret) {
@@ -255,7 +253,7 @@ function rt_sendExitSignal(lRecipientPid, lSenderPid, lReason, ret = true) {
             }
         }
     } else {
-        console.log ("Remote signals note implemented");
+        console.log ("TODO: Remote signals not implemented");
         return $t().returnImmediateLValue(__unit);
     }
 }
