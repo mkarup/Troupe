@@ -55,17 +55,20 @@ Based on:
 This section describes the concepts of exit signals, process linking and system processes.
 
 **** Illustrating links and exit signals
+:properties:
+:header-args: :tangle ./erlang-examples/linkdemo.erl
+:end:
 
 This section contains Erlang code examples that demonstrates how process linking works in Erlang.
 The examples are based on the book Programming Erlang by Joe Armstrong.
 
 We define a new module
-#+BEGIN_SRC erlang :tangle /tmp/links.erl
+#+BEGIN_SRC erlang
 -module(links).
 #+END_SRC
 
 We define three processes A, B and C
-#+BEGIN_SRC erlang :tangle /tmp/links.erl
+#+BEGIN_SRC erlang
 processA() ->
   process_flag(trap_exit, true),
   wait_for_message('A').
@@ -89,7 +92,7 @@ processC(B, Exit) ->
 #+END_SRC
 
 We define a function ~wait_for_message~ that awaits a message and prints it
-#+BEGIN_SRC erlang :tangle /tmp/links.erl
+#+BEGIN_SRC erlang
 wait_for_message(Name) ->
   receive
     Message ->
@@ -99,7 +102,7 @@ wait_for_message(Name) ->
 #+END_SRC
 
 Finally, we define a function that queries the status of a process
-#+BEGIN_SRC erlang :tangle /tmp/links.erl
+#+BEGIN_SRC erlang
 status(Name, Pid) ->
   case erlang:is_process_alive(Pid) of
     true -> 
@@ -114,6 +117,9 @@ status(Name, Pid) ->
 This section describes Erlang's supervision principle.
 
 **** A simple hand rolled supervisor
+:properties:
+:header-args: :tangle ./erlang-examples/simple_supervisor.erl
+:end:
 
 This section contains Erlang code examples that demonstrate how process linking can be used for error handling by writing a simple, generic supervisor process.
 
