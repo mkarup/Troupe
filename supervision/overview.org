@@ -1,0 +1,202 @@
+#+TITLE: Process supervision in Troupe
+#+STARTUP: fnadjust
+
+* Process supervision in Troupe
+
+This document serves as an overview of the design and implementation of a process supervision mechanism in the Troupe programming language.
+
+** Introduction
+:properties:
+:custom_id: sec-troupe-supervision-introduction
+:end:
+
+The current iteration of Troupe lacks a proper way to handle errors.
+The goal is to allow one process to act as the /supervisor/ of another process.
+
+*** Motivation
+
+To allow programmers to build fault tolerant systems.
+
+*** Requirements
+
+An effective and reliable supervision mechanism must, at minimum, satisfy the following properties:
+1. The supervisor must know when the supervisee terminates.
+2. The supervisor must be able to forcefully terminate the supervisee.
+3. When the supervisor terminates the supervisee must also be terminated.
+4. The 1-3 must apply both an intra- and inter-node level.
+
+*** Challenges
+
+To implement the supervision mechanism in a way that does not violate non-interference.
+
+*** Approach
+
+The current message passing mechanism alone cannot be relied on for a number of reasons.
+First, processes may terminate unexpectedly due to e.g. run-time errors, meaning that they are not able to send a message to their supervisor before terminating, and processes must be aware that they are supervised to receive termination request from supervisors.
+Further, there is no way to guarantee that a supervisee is terminated if the supervisor terminates unexpectedly, leading to orphaned processes.
+
+Take inspiration from Erlang.
+Erlang's approach to error handling and the supporting language features are described in the [[#sec-erlang-error-handling][next section]].
+
+** Error handling in Erlang
+:properties:
+:custom_id: sec-erlang-error-handling
+:end:
+
+This section describes the approach to error handling in Erlang.
+The main supporting language feature is the ability to link processes together, along with the concept of exit signals and system processes.
+
+Based on:
+- The [[https://www.erlang.org/doc/system/readme.html][Erlang system documentation]], specifically the sections on [[https://www.erlang.org/doc/system/robustness.html#error-handling][error handling]], [[https://www.erlang.org/doc/system/design_principles.html][OTP design principles]] and the [[https://www.erlang.org/doc/system/sup_princ.html][supervisor behavior]].
+- The book /Programming Erlang/ by Joe Armstrong.
+
+*** Links, exit signals and system processes
+
+This section describes the concepts of exit signals, process linking and system processes.
+
+**** Illustrating links and exit signals
+
+This section contains Erlang code examples that demonstrates how process linking works in Erlang.
+The examples are based on the book Programming Erlang by Joe Armstrong.
+
+We define a new module
+#+BEGIN_SRC erlang :tangle /tmp/links.erl
+-module(links).
+#+END_SRC
+
+We define three processes A, B and C
+#+BEGIN_SRC erlang :tangle /tmp/links.erl
+processA() ->
+  process_flag(trap_exit, true),
+  wait_for_message('A').
+
+processB(A, TrapFlag) ->
+  process_flag(trap_exit, TrapFlag),
+  link(A),
+  wait_for_message('B').
+
+processC(B, Exit) ->
+  link(B),
+  case Exit of
+    {"die", Reason} ->
+      exit(Reason);
+    {"divide", N} ->
+      1/N,
+      wait_for_message('C');
+    normal ->
+      true
+  end.
+#+END_SRC
+
+We define a function ~wait_for_message~ that awaits a message and prints it
+#+BEGIN_SRC erlang :tangle /tmp/links.erl
+wait_for_message(Name) ->
+  receive
+    Message ->
+      io:format("Process ~p received the message ~p~n", [Name, Message]),
+      wait_for_message(Name)
+  end.  
+#+END_SRC
+
+Finally, we define a function that queries the status of a process
+#+BEGIN_SRC erlang :tangle /tmp/links.erl
+status(Name, Pid) ->
+  case erlang:is_process_alive(Pid) of
+    true -> 
+      io:format("Process ~p (~p) is alive~n", [Name, Pid]); 
+    false -> 
+      io:format("Process ~p (~p) is dead~n", [Name, Pid])
+  end.
+#+END_SRC
+
+*** The supervision principle
+
+This section describes Erlang's supervision principle.
+
+**** A simple hand rolled supervisor
+
+This section contains Erlang code examples that demonstrate how process linking can be used for error handling by writing a simple, generic supervisor process.
+
+#+BEGIN_SRC erlang :noweb-ref simple_supervisor
+-module(simple_supervisor).
+
+start_children([], Children) -> Children;
+start_children([{Start}|Rest], Children) ->  
+  Child_pid = spawn_link(Start),
+  start_children(Rest, maps:put(Child_pid, {Start}, Children)).
+
+kill_child(Child_pid) ->
+  exit(Child_pid, kill),
+  receive
+    {'EXIT', Child_pid, _} ->
+      ok
+  end.
+
+terminate_children(Children) ->
+  maps:foreach(fun (Pid, _) -> kill_child(Pid) end, Children).
+
+supervisor_handle_termination(Pid, {Strategy, Child_specs, Children}) ->
+  case maps:find(Pid, Children) of
+    {ok, Child_spec} ->      
+      case Strategy of
+        "one_for_all" ->
+          ok = terminate_children(maps:remove(Pid, Children)),
+          New_children = start_children(Child_specs, maps:new()),
+          {ok, {Strategy, Child_specs, New_children}};
+        "one_for_one" ->
+          New_children = start_children([Child_spec], maps:remove(Pid, Children)),
+          {ok, {Strategy, Child_specs, New_children}}
+      end;
+    _ ->
+      {ok, {Strategy, Child_specs, Children}}
+  end.
+
+supervisor_loop(State) ->
+  receive
+    {'EXIT', Pid, Reason} ->
+      io:format("Received exit signal from child with reason ~w~n", [Reason]),
+      {ok, New_state} = supervisor_handle_termination(Pid, State),
+      supervisor_loop(New_state)
+  end.
+
+simple_supervisor(Strategy, Child_specs) ->
+  process_flag(trap_exit, true),
+  Children = start_children(Child_specs, maps:new()),
+  State = {Strategy, Child_specs, Children},
+  supervisor_loop(State).
+#+END_SRC
+
+**** The standard library supervisor module
+
+This section contains Erlang code examples that demonstrate use of the supervisor behavior from Erlang's standard library.
+
+** Design
+:properties:
+:custom_id: sec-troupe-supervision-design
+:end:
+
+This section describes the design of a process linking mechanism. 
+
+*** Challenges
+
+This section describes the challenges and pitfalls of designing a security-aware process linking mechanism, and exposing it to programmers.
+
+It is not entirely obvious how to translate the concepts of linking processes and exit signals from Erlang to a noninterference context. 
+Erlang-style linking introduces another information channel, since the emission of exit signals may leak information via the program control context, or even directly, if arbitrary Troupe values can be passed as exit reasons.
+
+Elevating a process to a system process by allowing it to trap exit signals.
+
+For example, if a program only crashes if a specific branch is taken, linked processes trapping exits can gain information about which branch was taken.
+Furthermore, two processes may be linked both directly and indirectly, as exit signals are propagated; the link relation is transitive.
+
+Encoding a secret through process linking.
+
+Similar to the mailbox, the set of linked processes and the signal queue, and possibly whether or not a process is trapping exit signals, are /mutable state/.
+
+*** Possible designs
+
+This section describes design possibilities for a process linking mechanism.
+
+*** Arguing noninterference of the designs
+
+When evaluating, consider whether there is ambient authority or mutable state involved.
