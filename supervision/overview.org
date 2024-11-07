@@ -25,7 +25,12 @@ An effective and reliable supervision mechanism must, at minimum, satisfy the fo
 
 ** Challenges
 
-To implement the supervision mechanism in a way that does not violate non-interference.
+- Security
+  - Confidentiality (noninterference)
+  - Availability
+- Efficiency
+- Portability
+- Usability (in practice)
 
 ** Approach
 
@@ -34,7 +39,23 @@ First, processes may terminate unexpectedly due to e.g. run-time errors, meaning
 Further, there is no way to guarantee that a supervisee is terminated if the supervisor terminates unexpectedly, leading to orphaned processes.
 
 Take inspiration from Erlang.
-Erlang's approach to error handling and the supporting language features are described in the [[#sec-erlang-error-handling][next section]].
+Erlang's approach to error handling and the supporting language features are described in [[#sec-erlang-error-handling][this section]].
+
+** Use cases
+
+The main use case is to support process supervision.
+
+** Security considerations
+
+What can go wrong?
+Avoid leaking information; violating noninterference.
+Strictness; balancing security with practical considerations; explicit declassification.
+
+** Evaluation
+
+- Does the proposed solution meet the requirements?
+- Is the proposed solution secure?
+- Does the proposed solution have any limitations?
 
 * Error handling in Erlang
 :properties:
@@ -179,7 +200,7 @@ This section contains Erlang code examples that demonstrate use of the superviso
 :custom_id: sec-troupe-supervision-design
 :end:
 
-This section describes the design of a process linking mechanism. 
+This section describes the design of a process linking mechanism.
 
 ** Challenges
 
@@ -199,7 +220,39 @@ Similar to the mailbox, the set of linked processes and the signal queue, and po
 
 ** Possible designs
 
-This section describes design possibilities for a process linking mechanism.
+This section describes design possibilities/ design iterations for a process linking mechanism.
+
+*** A first (naive) solution
+
+- Add built-in functions that are Troupe analogs of Erlang's link primitives, with similar semantics.
+- No restrictions on linking process, trapping or sending exit signals.
+- There is no way to query the set of linked processes.
+- Processes are unaware that they are being linked.
+- Broadcasting an exit signal taints it with the confidentiality level of the program context and the reason value.
+- Exit trapping processes must explicitly raise their mailbox to receive notices of termination.
+- A run-time violation of non-interference through inter-node broadcast of exit signals terminates all links between the affected nodes.
+
+
+Evaluation:
+- Availability concerns: Malicious processes can crash other processes through links or exit signals.
+- Confidentiality concerns: Information may leak.
+- Ambient authority: Any processes is allowed to elevate itself to a system process (trap exit signals). 
+
+*** Restricting linking via capabilities
+
+- Restrict the ability to link, trap and send exit signals by requiring a capability.
+- The capability can be obtained through 2 means:
+  - The process that spawns the process obtains a capability to link to it.
+  - The process itself has a capability, obtained when it is spawned (which it may give to other processes).
+
+
+Evaluation:
+
+*** Other possibilities
+
+- Require both the capability of the linker and linkee when linking (since a link is bi-directional)
+- Define exit trapping per process and require a capability
+- Put a ceiling on the security level of a link
 
 ** Arguing noninterference of the designs
 
