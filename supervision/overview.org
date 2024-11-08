@@ -11,14 +11,14 @@ while preserving Troupe's security guarantees.
 :visibility: all
 :end:
 
-** [[#sec-introduction][Introduction]]
-*** [[#sec-motivation][Motivation]]
-*** [[#sec-requirements][Requirements]]
-*** [[#sec-challenges][Challenges]]
-*** [[#sec-evaluation-criteria][Evaluation criteria]]
-** [[#sec-approach][Approach]]
-*** [[#sec-erlang][Error handling in Erlang]]
-** [[#sec-design][Design]]
+- [[#sec-introduction][Introduction]]
+  - [[#sec-motivation][Motivation]]
+  - [[#sec-requirements][Requirements]]
+  - [[#sec-challenges][Challenges]]
+  - [[#sec-evaluation-criteria][Evaluation criteria]]
+- [[#sec-approach][Approach]]
+  - [[#sec-erlang][Error handling in Erlang]]
+- [[#sec-design][Design]]
 
 * Introduction
 :properties:
