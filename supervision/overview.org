@@ -186,6 +186,16 @@ status(Name, Pid) ->
   end.
 #+END_SRC
 
+Compile with the command
+#+BEGIN_SRC shell :eval no
+erlc +export_all -W0 linkdemo.erl
+#+END_SRC
+
+Start the Erlang shell
+#+BEGIN_SRC shell :eval no
+erl -kernel logger_level critical
+#+END_SRC
+
 *** The supervision principle
 
 This section describes Erlang's supervision principle.
