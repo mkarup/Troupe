@@ -1,36 +1,51 @@
-#+TITLE: Process supervision in Troupe
+#+TITLE: Process supervision and monitoring in Troupe
 #+STARTUP: fnadjust
+#+OPTIONS: toc:3
+
 
 * Introduction
 :properties:
 :custom_id: sec-troupe-supervision-introduction
 :end:
 
-This document serves as an overview of the design and implementation of a process supervision mechanism in the Troupe programming language.
+Troupe is a programming language for concurrent and distributed programming with dynamic information flow control.
+As a research language, Troupe is focused on exploring new approaches to ensuring secure information flow in decentralized, multi-party systems.
 
-The current iteration of Troupe lacks a proper way to handle errors.
-The goal is to allow one process to act as the /supervisor/ of another process.
+One key limitation of the current Troupe design is the lack of a /supervision/ mechanism, the ability for processes to monitor and respond to the termination of other processes.
+This limits the ability to handle and recover from unexpected failures, which is crucial for building reliable and fault-tolerant distributed applications.
+
+This design document serves as an overview for integrating a security aware supervision mechanism into the Troupe language.
+The intent is to identify requirements and challenges, including security considerations, and explore possible designs of such a mechanism, with the goal of developing an MVP (minimum viable product; prototype).
+The supervision mechanism will enable processes to selectively monitor the lifecycle of other processes, detect failures, and implement custom recovery logic,
+while preserving Troupe's security guarantees.
 
 ** Motivation
 
-To allow programmers to build fault tolerant systems.
+- *Error handling and recovery*: Improve the reliability of Troupe programs by monitoring for and handling unexpected failure of processes. 
+- *Separation of concern*: Separate core application (business) logic from failure handling logic for more modular program design.
+- *Fault tolerance*: Isolate the failure of system components by automatically restarting or replacing them, maintaining overall availability of the system.
 
 ** Requirements
 
-An effective and reliable supervision mechanism must, at minimum, satisfy the following properties:
-1. The supervisor must know when the supervisee terminates.
-2. The supervisor must be able to forcefully terminate the supervisee.
-3. When the supervisor terminates the supervisee must also be terminated.
-4. The 1-3 must apply both an intra- and inter-node level.
+An effective and reliable supervision monitoring mechanism must, at minimum, satisfy the following functional properties:
+1. The mechanism must be able to accurately and promptly detect process failure to be able to respond appropriately to them as they occur.
+2. The mechanism must be able to forcefully terminate supervised processes, e.g. in order to reset a system component to a stable state.
+4. The mechanism must apply on both an intra- and inter-node level.
+5. The mechanism must not compromise confidentiality or violate the progress-sensitive noninterference security policy.
 
 ** Challenges
 
-- Security
-  - Confidentiality (noninterference)
-  - Availability
-- Efficiency
-- Portability
-- Usability (in practice)
+*** Security considerations.
+
+1. *Information leakage*: The ability to detect termination events introduces new channels for information leakage. For example, if a lower-security process is able to detect the termination of a higher-security process, this could reveal information about the internal state or behavior of the higher-security process, compromising confidentiality.
+2. *Covert channels*: A termination notification channel has the potential to act as a covert channel that allows bypassing the intended information flow control restrictions. 
+3. *Denial of service*: A supervision mechanism could be vulnerable to denial of service attacks, for example by repeatedly creating and terminating processes.
+
+*** Practical considerations
+
+1. *Efficiency*: Minimize performance and networking overhead related to supervision.
+2. *Portability*: Minimize reliance on system/networking specifics (implement as much of the functionality as possible in Troupe itself).
+3. *Usability*: Reduce the cognitive overhead related to using the mechanisms.
 
 ** Approach
 
@@ -38,24 +53,42 @@ The current message passing mechanism alone cannot be relied on for a number of 
 First, processes may terminate unexpectedly due to e.g. run-time errors, meaning that they are not able to send a message to their supervisor before terminating, and processes must be aware that they are supervised to receive termination request from supervisors.
 Further, there is no way to guarantee that a supervisee is terminated if the supervisor terminates unexpectedly, leading to orphaned processes.
 
-Take inspiration from Erlang.
+Take inspiration from Erlang and Akka.
+Both of these languages adopt a "let it crash" philosophy; business logic code should not be concerned with handling /unexpected failures/.
+The responsibility of this is delegated to another component.
+This is known as the /supervision principle/.
+
 Erlang's approach to error handling and the supporting language features are described in [[#sec-erlang-error-handling][this section]].
+
+Use the low-level features to implement libraries.
 
 ** Use cases
 
-The main use case is to support process supervision.
-
-** Security considerations
-
-What can go wrong?
-Avoid leaking information; violating noninterference.
-Strictness; balancing security with practical considerations; explicit declassification.
+- Restarting processes that have failed unexpectedly
+- Terminating 'stuck' or unresponsive (e.g. due to corrupt internal state) processes
+- Building supervision trees/ hierarchies
+- Monitoring the termination of other processes, also for normal termination for event processing (OBS: this can already be done programmatically)
 
 ** Evaluation
 
-- Does the proposed solution meet the requirements?
-- Is the proposed solution secure?
-- Does the proposed solution have any limitations?
+There are several key criteria to consider when evaluating a possible design
+1. Security assurance
+   1. Does not introduce new ways to leak information or covert channels; does not violate progress-sensitive noninterference
+   2. Robust against denial of service attacks/ availability vulnerabilities
+2. Expressiveness and flexibility
+   1. Handles different failure scenarios and recovery strategies
+   2. Supports supervision at different levels of granularity
+3. Usability and ergonomics
+   1. Ease of use of supervision-related APIs/constructs
+   2. Integrates with the rest of Troupe's programming model
+4. Performance and scalability
+   1. Minimizes performance overhead on supervised processes
+   2. Handles a large number of concurrent supervision relationships without impacting the rest of the system
+5. Alignment with Troupe's design principles
+   1. Integration with Troupe's existing security model and mechanisms
+
+When evaluating design proposals, it's important to weigh these criteria against each other and consider the trade-offs involved. For example, a design that maximizes security assurance may come at the cost of reduced expressiveness or usability. 
+For example, a design that maximizes security assurance may come at the cost of reduced expressiveness or usability.
 
 * Error handling in Erlang
 :properties:
@@ -221,6 +254,79 @@ Similar to the mailbox, the set of linked processes and the signal queue, and po
 ** Possible designs
 
 This section describes design possibilities/ design iterations for a process linking mechanism.
+
+
+*** Imagined use
+
+Linking two processes and trapping exit signals
+#+BEGIN_SRC sml
+let fun piggybank balance =
+        [ hn ("deposit", amount) =>
+          piggybank (balance + amount),
+
+          hn ("smash", receiver) =>
+          send (receiver, ("piggybank smashed", balance)),
+
+          hn ("balance", receiver) =>
+          let val _ = send ("piggybank balance", balance),
+          in piggybank balance
+          end
+        ]
+
+    (* Allow the curernt process to trap exit signals *)
+    val _ = process_flag("TRAP_EXIT", true)
+
+    (* Spawn the piggy bank process and link to it *)
+    val piggybank_pid = spawn (fn () -> piggybank 0)
+    val _ = link piggybank_pid
+in
+  (* Wait for an exit signal from the piggy bank *)
+  receive [
+    hn ("EXIT", pid, reason) when pid = piggybank_pid =>
+    print ("Piggy bank process (" ^ (toString piggybank_pid) ^ ") terminated with reason " ^ (toString reason))
+  ]
+end
+#+END_SRC
+- The ability to link two processes (from either end) using a built-in function provided by the Troupe runtime
+- The ability to trap exit signals, and receive them as normal messages
+
+
+A process that reads something from stdin, that then needs to be terminated?
+A ping-pong example?
+#+BEGIN_SRC sml
+import timeout
+
+let fun processA () =
+        let val (counter, key, sender) = receive [ hn x => x ]
+            val _ = send (sender, (counter + 1, key))
+        in processA ()
+        end
+
+    fun processB () = 
+        let val A = spawn processA
+            val _ = link A
+            val key = mkuuid () 
+            val _ = send (A, (0, key, self()))
+            fun loop () =
+                let val nonce = mkuuid ()
+                    val _ = spawn (fn () => timeout (self ()) nonce 2500)
+                in
+                  receive [ hn x when x = nonce => exit (A, "TIMEOUT"),
+                            
+                            hn (counter, k) when k = key =>
+                            let val _ = send (A, (counter + 1, key, self()))
+                            in loop ()
+                            end
+                          ]
+                end
+        in loop ()
+        end
+
+in
+  processB ()
+end
+#+END_SRC
+- The ability to send an exit signal to a process to forcefully terminate it (when would this be useful? if a process gets stuck somehow...)
 
 *** A first (naive) solution
 
