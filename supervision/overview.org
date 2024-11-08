@@ -47,31 +47,9 @@ An effective and reliable supervision monitoring mechanism must, at minimum, sat
 2. *Portability*: Minimize reliance on system/networking specifics (implement as much of the functionality as possible in Troupe itself).
 3. *Usability*: Reduce the cognitive overhead related to using the mechanisms.
 
-** Approach
+** Evaluation criteria
 
-The current message passing mechanism alone cannot be relied on for a number of reasons.
-First, processes may terminate unexpectedly due to e.g. run-time errors, meaning that they are not able to send a message to their supervisor before terminating, and processes must be aware that they are supervised to receive termination request from supervisors.
-Further, there is no way to guarantee that a supervisee is terminated if the supervisor terminates unexpectedly, leading to orphaned processes.
-
-Take inspiration from Erlang and Akka.
-Both of these languages adopt a "let it crash" philosophy; business logic code should not be concerned with handling /unexpected failures/.
-The responsibility of this is delegated to another component.
-This is known as the /supervision principle/.
-
-Erlang's approach to error handling and the supporting language features are described in [[#sec-erlang-error-handling][this section]].
-
-Use the low-level features to implement libraries.
-
-** Use cases
-
-- Restarting processes that have failed unexpectedly
-- Terminating 'stuck' or unresponsive (e.g. due to corrupt internal state) processes
-- Building supervision trees/ hierarchies
-- Monitoring the termination of other processes, also for normal termination for event processing (OBS: this can already be done programmatically)
-
-** Evaluation
-
-There are several key criteria to consider when evaluating a possible design
+Possible designs should be evaluated according to a number of key criteria
 1. Security assurance
    1. Does not introduce new ways to leak information or covert channels; does not violate progress-sensitive noninterference
    2. Robust against denial of service attacks/ availability vulnerabilities
@@ -87,8 +65,23 @@ There are several key criteria to consider when evaluating a possible design
 5. Alignment with Troupe's design principles
    1. Integration with Troupe's existing security model and mechanisms
 
-When evaluating design proposals, it's important to weigh these criteria against each other and consider the trade-offs involved. For example, a design that maximizes security assurance may come at the cost of reduced expressiveness or usability. 
+Finally, it is important to weigh these criteria against each other and consider the trade-offs involved.
 For example, a design that maximizes security assurance may come at the cost of reduced expressiveness or usability.
+
+* Approach
+
+The current message passing mechanism alone cannot be relied on for a number of reasons.
+First, processes may terminate unexpectedly due to e.g. run-time errors, meaning that they are not able to send a message to their supervisor before terminating, and processes must be aware that they are supervised to receive termination request from supervisors.
+Further, there is no way to guarantee that a supervisee is terminated if the supervisor terminates unexpectedly, leading to orphaned processes.
+
+For inspiration, Erlang's approach to error handling and the supporting language features are documented in [[#sec-erlang-error-handling][this section]].
+
+# Take inspiration from Erlang and Akka.
+# Both of these languages adopt a "let it crash" philosophy; business logic code should not be concerned with handling /unexpected failures/.
+# The responsibility of this is delegated to another component.
+# This is known as the /supervision principle/.
+
+# Use the low-level features to implement libraries.
 
 * Error handling in Erlang
 :properties:
