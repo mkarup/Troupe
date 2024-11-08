@@ -1,11 +1,28 @@
 #+TITLE: Process supervision and monitoring in Troupe
 #+STARTUP: fnadjust
-#+OPTIONS: toc:3
 
+This design document serves as an overview for integrating a security aware supervision mechanism into the Troupe language.
+The intent is to identify requirements and challenges, including security considerations, and explore possible designs of such a mechanism, with the goal of developing an MVP (minimum viable product; prototype).
+The supervision mechanism will enable processes to selectively monitor the lifecycle of other processes, detect failures, and implement custom recovery logic,
+while preserving Troupe's security guarantees.
+
+* Table of contents
+:properties:
+:visibility: all
+:end:
+
+** [[#sec-introduction][Introduction]]
+*** [[#sec-motivation][Motivation]]
+*** [[#sec-requirements][Requirements]]
+*** [[#sec-challenges][Challenges]]
+*** [[#sec-evaluation-criteria][Evaluation criteria]]
+** [[#sec-approach][Approach]]
+*** [[#sec-erlang][Error handling in Erlang]]
+** [[#sec-design][Design]]
 
 * Introduction
 :properties:
-:custom_id: sec-troupe-supervision-introduction
+:custom_id: sec-introduction
 :end:
 
 Troupe is a programming language for concurrent and distributed programming with dynamic information flow control.
@@ -14,18 +31,20 @@ As a research language, Troupe is focused on exploring new approaches to ensurin
 One key limitation of the current Troupe design is the lack of a /supervision/ mechanism, the ability for processes to monitor and respond to the termination of other processes.
 This limits the ability to handle and recover from unexpected failures, which is crucial for building reliable and fault-tolerant distributed applications.
 
-This design document serves as an overview for integrating a security aware supervision mechanism into the Troupe language.
-The intent is to identify requirements and challenges, including security considerations, and explore possible designs of such a mechanism, with the goal of developing an MVP (minimum viable product; prototype).
-The supervision mechanism will enable processes to selectively monitor the lifecycle of other processes, detect failures, and implement custom recovery logic,
-while preserving Troupe's security guarantees.
 
 ** Motivation
+:properties:
+:custom_id: sec-motivation
+:end:
 
 - *Error handling and recovery*: Improve the reliability of Troupe programs by monitoring for and handling unexpected failure of processes. 
 - *Separation of concern*: Separate core application (business) logic from failure handling logic for more modular program design.
 - *Fault tolerance*: Isolate the failure of system components by automatically restarting or replacing them, maintaining overall availability of the system.
 
 ** Requirements
+:properties:
+:custom_id: sec-requirements
+:end:
 
 An effective and reliable supervision monitoring mechanism must, at minimum, satisfy the following functional properties:
 1. The mechanism must be able to accurately and promptly detect process failure to be able to respond appropriately to them as they occur.
@@ -34,6 +53,9 @@ An effective and reliable supervision monitoring mechanism must, at minimum, sat
 5. The mechanism must not compromise confidentiality or violate the progress-sensitive noninterference security policy.
 
 ** Challenges
+:properties:
+:custom_id: sec-challenges
+:end:
 
 *** Security considerations.
 
@@ -48,6 +70,9 @@ An effective and reliable supervision monitoring mechanism must, at minimum, sat
 3. *Usability*: Reduce the cognitive overhead related to using the mechanisms.
 
 ** Evaluation criteria
+:properties:
+:custom_id: sec-evaluation-criteria
+:end:
 
 Possible designs should be evaluated according to a number of key criteria
 1. Security assurance
@@ -69,6 +94,10 @@ Finally, it is important to weigh these criteria against each other and consider
 For example, a design that maximizes security assurance may come at the cost of reduced expressiveness or usability.
 
 * Approach
+:properties:
+:custom_id: sec-approach
+:end:
+
 
 The current message passing mechanism alone cannot be relied on for a number of reasons.
 First, processes may terminate unexpectedly due to e.g. run-time errors, meaning that they are not able to send a message to their supervisor before terminating, and processes must be aware that they are supervised to receive termination request from supervisors.
@@ -83,9 +112,9 @@ For inspiration, Erlang's approach to error handling and the supporting language
 
 # Use the low-level features to implement libraries.
 
-* Error handling in Erlang
+** Error handling in Erlang
 :properties:
-:custom_id: sec-erlang-error-handling
+:custom_id: sec-erlang
 :end:
 
 This section describes the approach to error handling in Erlang.
@@ -95,11 +124,11 @@ Based on:
 - The [[https://www.erlang.org/doc/system/readme.html][Erlang system documentation]], specifically the sections on [[https://www.erlang.org/doc/system/robustness.html#error-handling][error handling]], [[https://www.erlang.org/doc/system/design_principles.html][OTP design principles]] and the [[https://www.erlang.org/doc/system/sup_princ.html][supervisor behavior]].
 - The book /Programming Erlang/ by Joe Armstrong.
 
-** Links, exit signals and system processes
+*** Links, exit signals and system processes
 
 This section describes the concepts of exit signals, process linking and system processes.
 
-*** Illustrating links and exit signals
+**** Illustrating links and exit signals
 :properties:
 :header-args: :tangle ./erlang-examples/linkdemo.erl
 :end:
@@ -157,11 +186,11 @@ status(Name, Pid) ->
   end.
 #+END_SRC
 
-** The supervision principle
+*** The supervision principle
 
 This section describes Erlang's supervision principle.
 
-*** A simple hand rolled supervisor
+**** A simple hand rolled supervisor
 :properties:
 :header-args: :tangle ./erlang-examples/simple_supervisor.erl
 :end:
@@ -217,13 +246,13 @@ simple_supervisor(Strategy, Child_specs) ->
   supervisor_loop(State).
 #+END_SRC
 
-*** The standard library supervisor module
+**** The standard library supervisor module
 
 This section contains Erlang code examples that demonstrate use of the supervisor behavior from Erlang's standard library.
 
 * Design
 :properties:
-:custom_id: sec-troupe-supervision-design
+:custom_id: sec-design
 :end:
 
 This section describes the design of a process linking mechanism.
