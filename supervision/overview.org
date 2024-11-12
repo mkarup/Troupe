@@ -97,9 +97,9 @@ First, processes may terminate unexpectedly due to e.g. run-time errors, meaning
 Further, there is no way to guarantee that a supervisee is terminated if the supervisor terminates unexpectedly, leading to orphaned processes.
 
 - Inspirations for supervision functionality
-  - [[https://www.erlang.org/][Erlang]] relies heavily on termination signals and the process linking/monitoring mechanisms for error handling, including the implementation of supervision
-  - [[http://haskell-distributed.github.io/][Cloud Haskell]] has almost the same linking/monitoring mechanisms as Erlang, except that the semantics are slightly simpler, since process linking is unidirectional
-  - [[https://akka.io/][Akka]] also uses a flavor of the linking and monitoring ("watching") approach
+  - [[https://www.erlang.org/][Erlang]] relies heavily on termination signals and the process linking/monitoring mechanisms for error handling, including the implementation of supervision (see sections on [[https://www.erlang.org/doc/system/robustness.html#error-handling][error handling]], [[https://www.erlang.org/doc/system/design_principles.html][the OTP design principles]] and [[https://www.erlang.org/doc/system/sup_princ.html][the supervision behavior]] in the Erlang system documentation)
+  - [[http://haskell-distributed.github.io/][Cloud Haskell]] has almost the same linking/monitoring mechanisms as Erlang, except that the semantics are slightly simpler, since process linking is unidirectional (see the sections on [[http://haskell-distributed.github.io/tutorials/3ch.html#monitoring-and-linking][monitoring and linking]] and [[http://haskell-distributed.github.io/tutorials/3ch.html#process-lifetime][process lifetime]] in the Cloud Haskell documentation)
+  - [[https://akka.io/][Akka]] also uses a flavor of the linking and monitoring approach (see the section on [[https://doc.akka.io/libraries/akka-core/current/general/supervision.html][supervision and monitoring]] in the Akka documentation)
 - Introduce a minimal supervision API, consisting of some built-in functions, inspired by the above
   - ~link~: Create a unidirectional /link/ between the current process (the "linker") and another process (the "linkee"); when the linkee terminates, so does the linker, but not the other way around.
   - ~monitor~: Create a unidirectional /monitor/ between the current process and another process; when the process being monitored terminates, the current process will receive a message (in the mailbox) with the reason (a Troupe value) for termination
