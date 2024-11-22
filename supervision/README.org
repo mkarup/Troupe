@@ -173,16 +173,18 @@ end
 
 To be useful for supervision, the API should work both on a local and
 cross-node level (it may be useful to provide variants of the above
-that also take a node id, similar to the spawn function). To
-facilitate this, there needs to be a notion of two nodes being
+that also take a node id, similar to the spawn function).
+
+To facilitate this, there needs to be a notion of two nodes being
 "connected". In case of a disconnect, which may be due to the failure
 of a node or a network partition, local processes that are either
 linking to or monitoring processes on the disconnected node must be
 notified: The linked processes must be terminated, and the monitoring
-processes must receive a termination message. In practice, connections
-between nodes can be maintained through the use of periodic
-"heartbeats", which can be implemented (mostly) in the Troupe language
-itself.
+processes must receive a termination message.
+
+In practice, connections between nodes can be maintained through the
+use of periodic "heartbeats", which can be implemented (mostly) in the
+Troupe language itself.
 
 **** Issues
 
@@ -213,33 +215,31 @@ itself.
      end
      #+end_src
      
-   - Similarly, linking to a process can also leak information about
-   the context of the process, but in a more subtle way.
-   Consider a process P_{1} running code that contains the following
-   snippet:
-   #+begin_src sml :eval no
-   (* ... *)
-   if secret then
-     1 / 0
-   else
+   - Similarly, linking to a process can also leak information about the context of the process, but in a more subtle way.
+     Consider a process P_{1} running code that contains the following snippet:
+     #+begin_src sml :eval no
      (* ... *)
-   #+end_src
-   Now consider another process P_{2}, which may be local, running the following code:
-   #+begin_src sml :eval no
-   let val _ = link pid
-       fun loop i =
-           let val _ = send (P3, i)
-               val _ = sleep 250
-           in loop (i + 1)
-   in
-     loop 0
-   end
-   #+end_src
-   Assuming that the network is reasonably reliable, the value of ~secret~
-   can be exfiltrated to P_{3}, which may residing on a remote, untrusted
-   node. Since P_{2} is executing in a public context, there is nothing
-   stopping it from continuously sending "heartbeats" to P_{3}, thereby
-   leaking information through /progress/.
+     if secret then
+       1 / 0
+     else
+       (* ... *)
+     #+end_src
+     Now consider another process P_{2}, which may be local, running the following code:
+     #+begin_src sml :eval no
+     let val _ = link pid
+         fun loop i =
+             let val _ = send (P3, i)
+                 val _ = sleep 250
+             in loop (i + 1)
+     in
+       loop 0
+     end
+     #+end_src
+     Assuming that the network is reasonably reliable, the value of ~secret~
+     can be exfiltrated to P_{3}, which may residing on a remote, untrusted
+     node. Since P_{2} is executing in a public context, there is nothing
+     stopping it from continuously sending "heartbeats" to P_{3}, thereby
+     leaking information through /progress/.
    
    - Transitivity further complicates the above
 2. Linking poses a potential availability concern, as an adversary can
