@@ -7,18 +7,6 @@ The intent is to identify requirements and challenges, including security consid
 The supervision mechanism will enable processes to selectively monitor the lifecycle of other processes, detect failures, and implement custom recovery logic,
 while preserving Troupe's security guarantees.
 
-* Table of contents
-:properties:
-:visibility: all
-:end:
-
-- [[Introduction]]
-  - [[#sec-motivation][Motivation]]
-  - [[#sec-requirements][Requirements]]
-  - [[#sec-challenges][Challenges]]
-  - [[#sec-evaluation-criteria][Evaluation criteria]]
-- [[Approach]]
-
 * Introduction
 :properties:
 :custom_id: sec-introduction
