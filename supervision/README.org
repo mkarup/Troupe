@@ -174,7 +174,7 @@ In practice, connections between nodes can be maintained through the
 use of periodic "heartbeats", which can be implemented (mostly) in the
 Troupe language itself.
 
-**** Issues
+**** Issues with v1
 
 1. Linking and monitoring opens a new covert channel through process termination
    - Monitoring a process can leak information about the context in
@@ -287,7 +287,7 @@ in the sense that whether a termination message is delivered depends
 on the trust relationship between nodes (in addition to network stability).
 
 
-**** Issues
+**** Issues with v2
 
 Leaking through the ~terminate~ function and transitivity:
 - Imagine 3 local nodes, P1, P2 and P3.
@@ -303,9 +303,7 @@ Leaking through the ~terminate~ function and transitivity:
      
 The same can be done using monitoring, i.e. if P1 is monitoring P2 instead of linking.
 
-+In fact, even if the termination signal that is sent from P3 to P2 is tainted by the context and propagated to the termination signal sent from P2 to P1, it will leak information.+
 
+* Resources
 
-Modify the semantics to address/mitigate the issues identified with the basic API.
-
-
+/resources go here.../
