@@ -319,8 +319,6 @@ Similar, if P_{3} is monitoring P_{2}, it won't be able to receive any terminati
 
 If the termination signal is sent to an untrusted node in a secret context, it also needs to be blocked.
 
+* TODO Resources
 
-
-* Resources
-
-/resources go here.../
+/list of resources go here.../
