@@ -100,9 +100,15 @@ Inspiration drawn from popular systems for building robust and fault tolerant di
 
 ** Designing a supervision API
 
+1. Start by establishing the basic functionality, at first without considering security/IFC
+2. Refine the design to be secure by identifying potential issues
+3. Repeat step 2
+4. ???
+5. Profit
+
 *** Basic supervision API, v1
 
-A base API consisting of 3 primitives based on Erlang/Cloud Haskell/Akka could be as follows:
+To start off, a base API consisting of 3 primitives based on Erlang/Cloud Haskell/Akka could be as follows:
 - ~link : pid -> ()~: /Link/ the calling process (the "linker") to process ~pid~ (the "linkee"). If the linkee
   terminates, for any reason, so does the linker (but not the other way around!)
   - Contrary to Erlang, links are defined to be unidirectional, as
@@ -117,7 +123,6 @@ A base API consisting of 3 primitives based on Erlang/Cloud Haskell/Akka could b
 - ~terminate : pid -> ()~: Send a /termination signal/ to process ~pid~,
   which will force the termination of ~pid~ (similar to Erlang's ~exit/2~,
   Cloud Haskell's ~kill~ and Akka's ~stop~).
-
 
 
 With these primitives in hand, a very simple generic supervisor could look something like the following:
@@ -203,7 +208,7 @@ Troupe language itself.
      end
      #+end_src
      
-   - Similarly, linking to a process can also leak information about the context of the process, but in a more subtle way.
+   - Similarly, linking or monitoring a process can also leak information about the context of the process, but in a more subtle way.
      Consider a process P_{1} running code that contains the following snippet:
      #+begin_src sml :eval no
      (* ... *)
@@ -224,10 +229,11 @@ Troupe language itself.
      end
      #+end_src
      Assuming that the network is reasonably reliable, the value of ~secret~
-     can be exfiltrated to P_{3}, which may residing on a remote, untrusted
+     can be exfiltrated to P_{3}, which may be residing on a remote, untrusted
      node. Since P_{2} is executing in a public context, there is nothing
-     stopping it from continuously sending "heartbeats" to P_{3}, thereby
-     leaking information through /progress/.   
+     stopping it from continuously sending "heartbeats" to P_{3} - it is in a public context - thereby
+     leaking information through the lack of output: If P_{1} dies, so does P_{2}.
+     This can also be achieved using a monitor instead of link.     
      
 2. Linking poses a potential availability concern, as an adversary can
    cause a (long running) process to link to another process under the adversary's
@@ -248,9 +254,9 @@ Troupe language itself.
 
 *** Supervision API, v2
 
-First, an attempt to modify the semantics to address/mitigate the confidentiality related issues identified with the basic API (postpone availability concerns).
+First, an attempt to modify the semantics to address/mitigate the confidentiality related issues identified with the basic API, postponing the availability concerns.
+
 Both monitoring and linking can be seen as a "delayed" form of (indirect) message passing: The terminating process sends a "signal" (a generalized sort of message) to the monitor/linker.
-This communication must also be subject to the enforcement of noninterference.
 
 **** Linking
 
@@ -263,45 +269,56 @@ In the example from the previous section, if the label supplied to the ~link~ fu
 
 **** Monitoring
 
-One way to ensure that information about the execution context (e.g.
-which branches have been taken) is not leaked via monitoring is to
-taint the termination message/signal with the blocking level of the
-process at the point of termination.
+One obvious way to ensure that information about the execution context (e.g. which branches have been taken)
+is not leaked /directly/ via monitoring, as illustrated in the previous section, is
+to taint the termination message/signal with the blocking level of the process at the point of
+termination.
 
 Assuming that the normal message passing mechanism is used for
 sending/delivery, the run-time monitor can enforce a secure information flow:
 - Termination messages bound for external monitors at untrusted nodes will be blocked
-- Local monitor processes must either be operating in a security
-  context that is at least as confidential as the terminated node, or
+- Local monitors must either be operating in a security
+  context that is at least as confidential as the terminated process, or
   explicitly raise the blocking level temporarily, in order to receive
   the termination message. This in turn means that they cannot relay
   the information to others without the authority to declassify it and
   lower the blocking level.
 
 
-For the monitoring example in the previous section, this will ensure
-that a monitor on an untrusted node cannot learn about termination
-that was influenced by confidential information. Similar to linking,
-this slightly "weakens" the guarantees on the monitoring relationship,
-in the sense that whether a termination message is delivered depends
-on the trust relationship between nodes (in addition to network stability).
-
+For the example in the previous section, this will ensure that an external monitor on an untrusted
+node cannot learn about termination that was influenced by confidential information. A local
+monitor will not be able to receive messages without operating in a secret context, and thus cannot leak information through heartbeats.
+Similar to linking, this slightly "weakens" the guarantees on the monitoring relationship,
+in the sense that whether a termination message is delivered depends on the trust relationship
+between nodes (in addition to network stability).
 
 **** Issues with v2
 
-Leaking through the ~terminate~ function and transitivity:
-- Imagine 3 local nodes, P1, P2 and P3.
-- P3 is some process that is handling some confidential data.
-- An attack can be mounted as follows:
-  1. P1 first links to P2
-  2. P1 continuously sends heartbeats to a remote untrusted node
-  3. P2 just loops/blocks/sleeps indefinitely
-  4. P3 branches on a confidential value, and depending on the result, sends a termination signal to P2
-  5. P2 terminates, which in turn breaks the link, terminating P1
-  6. The heartbeats to the remote node stops, leaking information
+Terminating a process using the ~terminate~ function can also be used to leak information, by combining it with links and monitors.
+Consider a process P_{1} running code that contains the following snippet:
+#+begin_src sml :eval no
+(* ... *)
+if secret then
+  terminate P2
+else
+  (* ... *)
+#+end_src
+where P_{2} is some local process.
+A third local process P_{3} can link itself to P_{2} and use the same heartbeat trick as earlier to exfiltrate the value of ~secret~.
+If P_{2} is just some process that is operating in a public context and waiting indefinitely, the link can be public, and the heartbeats will go through.
+Similarly, swapping the link for a monitor means that P_{3} can leak the information directly.
 
-     
-The same can be done using monitoring, i.e. if P1 is monitoring P2 instead of linking.
+*** Supervision API, v3
+
+One possible solution to deal with such a leak through the ~terminate~ function, is to also taint the termination signal that is sent when calling ~terminate~ with the context of the sender, and then /propagate/ that taint to the termination signal that is sent when the receiver terminates.
+Essentially, the context of the receiving process is raised to the least upper bound of its current context and the senders context before it is terminated.
+
+This means that the restrictions added on links and monitors in added v2 kicks in and prevents a leak like in the previous section:
+P_{3} needs to be in a secret context in order to be linked to P_{2}, which means that it is not able to send heartbeats to untrusted nodes.
+Similar, if P_{3} is monitoring P_{2}, it won't be able to receive any termination messages unless it is in a secret context. 
+
+If the termination signal is sent to an untrusted node in a secret context, it also needs to be blocked.
+
 
 
 * Resources
