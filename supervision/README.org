@@ -9,6 +9,8 @@ supervision mechanism will enable processes to selectively monitor the lifecycle
 link the lifecycle of two processes, detect failures, and implement custom recovery logic, while
 preserving Troupe's security guarantees.
 
+*NOTE: The code snippets are meant to serve as illustrations/pseudo-code, syntax may not be correct.*
+
 * Introduction
 
 Troupe is a programming language for concurrent and distributed programming with dynamic information flow control.
