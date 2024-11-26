@@ -9,7 +9,7 @@ supervision mechanism will enable processes to selectively monitor the lifecycle
 link the lifecycle of two processes, detect failures, and implement custom recovery logic, while
 preserving Troupe's security guarantees.
 
-*NOTE: The code snippets are meant to serve as illustrations/pseudo-code, syntax may not be correct.*
+*NOTE: The code snippets are meant to serve as illustrations/pseudo-code, and may not constitute complete programs, and syntax may not be correct.*
 
 * Introduction
 
@@ -65,7 +65,7 @@ Troupe's current message passing mechanism alone cannot be relied on:
 
 ** Inspirations for supervision functionality
 
-Inspiration drawn from popular systems for building robust and fault tolerant distributed systems: 
+Inspiration drawn from popular systems for building robust and fault tolerant distributed systems:
 - [[https://www.erlang.org/][Erlang]] relies heavily on /exit signals/ and the process linking/monitoring mechanisms for error handling, including the implementation of supervision (see sections on [[https://www.erlang.org/doc/system/robustness.html#error-handling][error handling]], [[https://www.erlang.org/doc/system/design_principles.html][the OTP design principles]] and [[https://www.erlang.org/doc/system/sup_princ.html][the supervision behavior]] in the Erlang system documentation)
 - [[http://haskell-distributed.github.io/][Cloud Haskell]] has almost the same linking/monitoring mechanisms as Erlang, except that the semantics are slightly simpler, since process linking is unidirectional (see the sections on [[http://haskell-distributed.github.io/tutorials/3ch.html#monitoring-and-linking][monitoring and linking]] and [[http://haskell-distributed.github.io/tutorials/3ch.html#process-lifetime][process lifetime]] in the Cloud Haskell documentation)
 - [[https://akka.io/][Akka]] also uses a flavor of the linking and monitoring approach (see the section on [[https://doc.akka.io/libraries/akka-core/current/general/supervision.html][supervision and monitoring]] in the Akka documentation)
@@ -74,9 +74,7 @@ Inspiration drawn from popular systems for building robust and fault tolerant di
 
 1. Start by establishing the basic functionality, at first without considering security/IFC
 2. Refine the design to be secure by identifying potential issues
-3. Repeat step 2
-4. ???
-5. Profit
+3. Implement MVP
 
 *** Basic supervision API, v1
 
@@ -91,11 +89,10 @@ To start off, a base API consisting of 3 primitives based on Erlang/Cloud Haskel
 - ~monitor : pid -> monRef~: /Monitor/ process ~pid~. If ~pid~ terminates, the
   calling process will receive a /termination message/ in the mailbox.
   The message will contain a /reason/, which describes how ~pid~
-  terminated, e.g. normally or due to a run-time error.   
+  terminated, e.g. normally or due to a run-time error.
 - ~terminate : pid -> ()~: Send a /termination signal/ to process ~pid~,
   which will force the termination of ~pid~ (similar to Erlang's ~exit/2~,
   Cloud Haskell's ~kill~ and Akka's ~stop~).
-
 
 With these primitives in hand, a very simple generic supervisor could look something like the following:
 #+BEGIN_SRC sml
@@ -114,7 +111,7 @@ let fun supervise child_fun =
             val mon_ref = monitor child_pid
         in
           receive [
-            hn ("DOWN", mon_ref', pid, reason) when mon_ref' = mon_ref =>                        
+            hn ("DOWN", mon_ref', pid, reason) when mon_ref' = mon_ref =>
             (* Handle the termination appropriately,
                e.g. by restarting/respawning the child *)
             ...
@@ -155,11 +152,8 @@ Troupe language itself.
 
 1. Linking and monitoring opens a new covert channel through process termination
    - Monitoring a process can leak information about the context in
-     which it terminates, e.g. when branching on a high conditional,
-     if this is not taken into account when relaying the termination
-     message.
-     Consider a process P_{1} running code that contains the
-     following snippet:
+     which it terminates, e.g. when branching on a secret conditional.
+     Consider a process p running code that contains the following snippet:
      #+begin_src sml :eval no
      (* ... *)
      if secret then
@@ -167,11 +161,11 @@ Troupe language itself.
      else
        ()
      #+end_src
-     Now consider another process P_{2}, running the following code:
+     Now consider another process Q, running the following code:
      #+begin_src sml :eval no
      let
        (* obtain pid ... *)
-       val ref = monitor P1
+       val ref = monitor P
      in
        receive [
          hn ("DOWN", ref', pid, "NORMAL") => print "So it was false, huh",
@@ -179,9 +173,11 @@ Troupe language itself.
        ]
      end
      #+end_src
-     
+     Since the reason for termination depends on the value of ~secret~, Q can learn it through the shape of the termination message received through monitoring.
+     If Q is local, this can be relayed to an untrusted remote receiver.
+
    - Similarly, linking or monitoring a process can also leak information about the context of the process, but in a more subtle way.
-     Consider a process P_{1} running code that contains the following snippet:
+     Consider a process P running code that contains the following snippet:
      #+begin_src sml :eval no
      (* ... *)
      if secret then
@@ -189,108 +185,125 @@ Troupe language itself.
      else
        (* ... *)
      #+end_src
-     Now consider another process P_{2}, which may be local, running the following code:
+     Now consider another process Q_{1}, which may be local, running the following code:
      #+begin_src sml :eval no
-     let val _ = link pid
+     let val _ = link P
          fun loop i =
-             let val _ = send (P3, i)
-                 val _ = sleep 250
+             let val _ = send (Q2, i)
              in loop (i + 1)
+             end
      in
        loop 0
      end
      #+end_src
-     Assuming that the network is reasonably reliable, the value of ~secret~
-     can be exfiltrated to P_{3}, which may be residing on a remote, untrusted
-     node. Since P_{2} is executing in a public context, there is nothing
-     stopping it from continuously sending "heartbeats" to P_{3} - it is in a public context - thereby
-     leaking information through the lack of output: If P_{1} dies, so does P_{2}.
-     This can also be achieved using a monitor instead of link.     
-     
-2. Linking poses a potential availability concern, as an adversary can
+     Assuming that the network is reasonably reliable, the value of ~secret~ can be learned by Q_{2}, which may be an untrusted remote receiver:
+     Since P_{1} is executing in a public context, there is nothing stopping it from continuously sending "heartbeats" to Q_{2} - it is in a
+     public context - thereby leaking information through the lack of output.
+     This type of leak can also be achieved using a monitor instead of a link.
+
+2. Terminating a process using the ~terminate~ function can also be used to leak information.
+   Consider a process P, running the code:
+   #+begin_src sml :eval no
+   (* ... *)
+   if secret then
+     terminate Q1
+   else
+     terminate Q2
+   #+end_src
+   and processes Q_{i}, running the code
+   #+begin_src sml :eval no
+   let fun loop n =
+           let val _ = send (Q, (i, n))
+           in loop (n + 1)
+           end
+   in
+     loop 0
+   end
+   #+end_src
+   Like with linking and monitoring, Q can learn the value of ~secret~ through the absence of output from either Q_{1} or Q_{2}.
+
+3. Linking poses a potential availability concern, as an adversary can
    cause a (long running) process to link to another process under the adversary's
    control, e.g. when evaluating untrusted code, and thereby
-   indirectly kill the linked process:   
-     #+begin_src sml :eval no
-     let val kill_pid = spawn(fn () => receive [ hn "die" => 1 / 0 ])
-         fun kill_fun () = link kill_pid
-         val _ = send (P, kill_fun)
-     in
-       (* ... *)
-       send (kill_pid, "die")
-     end
-     #+end_src
+   indirectly kill the linked process:
+   #+begin_src sml :eval no
+   let val kill_pid = spawn(fn () => receive [ hn "die" => 1 / 0 ])
+       fun kill_fun () = link kill_pid
+       val _ = send (P, kill_fun)
+   in
+     (* ... *)
+     send (kill_pid, "die")
+   end
+   #+end_src
 
-3. The ability to terminate arbitrary processes also directly enables
-   a denial-of-service attack by killing off processes.
+4. The ability to terminate arbitrary processes also directly enables a denial-of-service attack by
+   killing off processes.
 
-*** Supervision API, v2
+*** Securing links, monitors and process termination (API, v2)
 
-First, an attempt to modify the semantics to address/mitigate the confidentiality related issues identified with the basic API, postponing the availability concerns.
+An attempt at refining the v1 API to address/mitigate the security related issues.
 
-Both monitoring and linking can be seen as a "delayed" form of (indirect) message passing: The terminating process sends a "signal" (a generalized sort of message) to the monitor/linker.
+Both monitoring and linking can be seen as a "delayed" form of (indirect) message passing:
+- Monitoring/ linking to a process conceptually results in that process sending a termination signal/message to the monitor/linker, "just before it terminates"
+- Monitors must /explicitly/ receive it by inspecting the mailbox (calling ~receive~ with an appropriate handler)
+- Links /implicitly/ receive it, at any point in the program, circumventing the mailbox
+- If the terminating process is in secret context (PC/blocking level), e.g. by branching on a secret value, it must be prevented from sending termination signals/messages to public processes, i.e. 'no write down'
+
+Additionally, linking and forcefully terminating a process (i.e. calling ~terminate~ it) can (unexpectedly) interrupt the control flow at any point in a program, which is potentially publicly observable.
 
 **** Linking
 
-One challenge in dealing with the leak in the linking example of the previous section is that by the time the violation is identified, it's already "too late" - we do not know ahead of time the context in which a process will terminate, and by the time the runtime kills the linker, information may have already leaked through the progress channel.
+A challenge in dealing with the leak in the linking example of the previous section is that by the time the violation is identified, it's already "too late" - we do not know ahead of time the context in which a process will terminate, and by the time the runtime kills the linker, information may have already leaked through the progress channel.
 
-One way to address this is to modify the ~link~ function to also take a security label, say l_{1}, in addition to the ID of the process to link with, and calling the function raises the blocking label of the caller to l_{1}.
-Additionally, the guarantees on linking must be "weakened" (relative to how it works in Erlang & friends) by only enforcing that the linker (caller) will be terminated, if the linkee terminated with a blocking label l_{2} equal to or lower than l_{1}, i.e. l_{2} ⊑ l_{1}. 
+One way to address this is to modify the ~link~ function to also take a security label, say l_{1}, in addition to the ID of the process to link with, and calling the function raises the blocking label of the caller to l_{1}. When the process being linked to terminates with blocking level l_{2}, the termination signal/message will only be "received", something that happens implicitly, if l_{2} ⊑ l_{1}, i.e. /a public process is allowed to send information to a secret process, and the secret process is allowed to read it./
 
-In the example from the previous section, if the label supplied to the ~link~ function is higher than that of P_{3}, the first call to ~send~ will cause the runtime security monitor to terminate P_{2} due to an IFC violation, and P_{3} will never receive /any/ heartbeats, preventing a leak through the divergence of P_{2}.
+In the example from ..., if the label supplied to the ~link~ function is higher than that of P_{3}, the first call to ~send~ will cause the runtime security monitor to terminate P_{2} due to an IFC violation, and P_{3} will never receive /any/ heartbeats, preventing a leak through the divergence of P_{2}.
+
+An unfortunate side effect of this is that the guarantees that programmers get on linking are "weakened" (relative to e.g. Erlang):
+Whether the linker (the caller of ~link~) will be terminated when the linkee (the argument supplied to the ~link~ call) terminates, depends on the PC/blocking level of the linkee, and this might evolve unexpectedly and thus make it less reliable.
 
 **** Monitoring
 
-One obvious way to ensure that information about the execution context (e.g. which branches have been taken)
-is not leaked /directly/ via monitoring, as illustrated in the previous section, is
-to taint the termination message/signal with the blocking level of the process at the point of
-termination.
+One way to ensure that information about the execution context (e.g. which branches have been taken)
+is not leaked /directly/ via monitoring, is to taint the termination message/signal with the blocking
+level of the process at the point of termination.
 
-Assuming that the normal message passing mechanism is used for
-sending/delivery, the run-time monitor can enforce a secure information flow:
+Assuming that the normal message passing mechanism is used for sending/delivery, the run-time
+monitor can enforce a secure information flow:
 - Termination messages bound for external monitors at untrusted nodes will be blocked
-- Local monitors must either be operating in a security
-  context that is at least as confidential as the terminated process, or
-  explicitly raise the blocking level temporarily, in order to receive
-  the termination message. This in turn means that they cannot relay
-  the information to others without the authority to declassify it and
-  lower the blocking level.
+- Local monitors must either be operating in a security context that is at least as confidential as
+  the terminated process, or explicitly raise the blocking level (temporarily), in order to receive
+  the termination message.
+- This in turn means that they cannot perform any publicly observable actions without the authority
+  to lower the blocking level, and they cannot relay the termination message without declassifying
+  it.
 
+This will ensure that an external monitor on an untrusted node cannot learn about termination that
+was influenced by confidential information. A local monitor will not be able to receive messages
+without operating in a secret context, and thus cannot leak information through heartbeats.
+Similar to linking, this slightly "weakens" the guarantees on the monitoring relationship, in the sense that
+whether a termination message is delivered depends on the PC/blocking level of a process,
+which might evolve unexpectedly.
 
-For the example in the previous section, this will ensure that an external monitor on an untrusted
-node cannot learn about termination that was influenced by confidential information. A local
-monitor will not be able to receive messages without operating in a secret context, and thus cannot leak information through heartbeats.
-Similar to linking, this slightly "weakens" the guarantees on the monitoring relationship,
-in the sense that whether a termination message is delivered depends on the trust relationship
-between nodes (in addition to network stability).
+**** TODO Monitoring or linking to an "already dead" process
 
-**** Issues with v2
+**** Termination
 
-Terminating a process using the ~terminate~ function can also be used to leak information, by combining it with links and monitors.
-Consider a process P_{1} running code that contains the following snippet:
-#+begin_src sml :eval no
-(* ... *)
-if secret then
-  terminate P2
-else
-  (* ... *)
-#+end_src
-where P_{2} is some local process.
-A third local process P_{3} can link itself to P_{2} and use the same heartbeat trick as earlier to exfiltrate the value of ~secret~.
-If P_{2} is just some process that is operating in a public context and waiting indefinitely, the link can be public, and the heartbeats will go through.
-Similarly, swapping the link for a monitor means that P_{3} can leak the information directly.
+- Termination poses both a confidentiality and availability issue, if any process is allowed to terminate any other process
+- To simplify both the low level API and the security analysis of it, process termination can be provided in a restricted form.
+- The main use case is supervision, in which a supervisor will have responsibility over a number of child processes, e.g. spawning and re-spawning them.
+- In such a scenario, it makes sense to allow the parent of a process to terminate a child.
+- This can be done programmatically, using the link primitive.
 
-*** Supervision API, v3
+**** Cross-node monitoring/linking requests
 
-One possible solution to deal with such a leak through the ~terminate~ function, is to also taint the termination signal that is sent when calling ~terminate~ with the context of the sender, and then /propagate/ that taint to the termination signal that is sent when the receiver terminates.
-Essentially, the context of the receiving process is raised to the least upper bound of its current context and the senders context before it is terminated.
+- /Outgoing/ monitor/link request: If ~p~ in context l_{p}, wants to monitor/link to ~q~ on node ~n~, and node ~n~ is trusted to lvl l_{n}, only allow the /outbound/ request if l_{p} ⊑ l_{n} (additionally also take the level of the link into account), otherwise terminate with IFC violation (since it's equivalent of sending a message)
 
-This means that the restrictions added on links and monitors in added v2 kicks in and prevents a leak like in the previous section:
-P_{3} needs to be in a secret context in order to be linked to P_{2}, which means that it is not able to send heartbeats to untrusted nodes.
-Similar, if P_{3} is monitoring P_{2}, it won't be able to receive any termination messages unless it is in a secret context. 
-
-If the termination signal is sent to an untrusted node in a secret context, it also needs to be blocked.
+- /Incoming/ monitor/link request: If node n with trust level l_{n}, wants to monitor/link to local process p, only honor the request (i.e. send the termination signal/message back) if p terminates in context l_{p} such that l_{p} ⊑ l_{n} (additionally also take the level of the link into account)
 
 * TODO Resources
 
-/list of resources go here.../
+- [[https://dl.acm.org/doi/10.1145/1863509.1863514][A unified semantics for future Erlang]], Svensson, Fredlun & Benac-Earle, 2010
+- [[https://haskell-distributed.github.io/static/semantics.pdf][Cloud Haskell Semantics (draft pdf)]]
+- [[https://ieeexplore.ieee.org/abstract/document/1212703][Observational determinism for concurrent program security]], Zdancewic & Myers, 2003
+- [[https://ieeexplore.ieee.org/abstract/document/5207637][Noninterference for a practical DIFC-based operating system]], Krohn & Tromer, 2009
