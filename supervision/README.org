@@ -1,6 +1,7 @@
 #+TITLE: Process supervision and monitoring in Troupe
 #+STARTUP: fnadjust
 #+OPTIONS: toc:2
+#+OPTIONS: f:t
 
 This design document serves as an overview for integrating a security aware supervision mechanism
 into the Troupe language. The intent is to identify requirements and challenges, including security
@@ -138,8 +139,9 @@ end
 
 To be useful for supervision, the API should work both on a local and cross-node level.
 
-To facilitate this, there needs to be a notion of two nodes being "connected", in terms of linking/monitoring.
-Initiating a monitoring/linking relationship between processes on two nodes establishes the connection, if they were not already connected, and the connection is maintained as long as there is at least one active monitor/link[fn:2].
+To facilitate this, there needs to be a notion of two nodes being /connected/, in relation to linking/monitoring.
+- Initiating a monitoring/linking relationship between processes (calling ~monitor~ or ~link~) on two different nodes establishes the connection, if they were not already connected.
+- The connection is maintained as long as there is at least one active monitor/link[fn:2].
 
 In case of a disconnect, which may be due to the failure of a node or a network partition, monitoring/linking relationships between processes on the now disconnected nodes must be broken:
 - Processes that have linked themselves to a process on the disconnected node must be terminated.
@@ -148,7 +150,7 @@ In case of a disconnect, which may be due to the failure of a node or a network 
 It may be the case, e.g. due to network instability, that a disconnected node later rejoins the network, *without realizing that it was disconnected*, and it may still assume that links/monitors established in the previous connection are active.
 When this happens, disconnected node must be informed of the disconnect, such that the nodes agree on which monitoring/linking relationships (which may mean retroactively terminating links or informing monitors).
 
-[fn:2] In practice, connections between nodes can be maintained through the use of periodic "heartbeats", which can be implemented (mostly) in the Troupe language itself.
+[fn:2] In practice, connections between nodes can be maintained through the use of periodic "heartbeats", which can be implemented (mostly) in the Troupe language itself. 
 
 **** Issues with v1
 
