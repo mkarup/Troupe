@@ -52,17 +52,6 @@ An effective and reliable supervision monitoring mechanism must, at minimum, sat
 
 * Approach
 
-Troupe's current message passing mechanism alone cannot be relied on:
-- Processes may terminate unexpectedly due to e.g. run-time errors,
-  meaning that they are not able to send a message to their supervisor
-  before terminating, and processes must be aware that they are
-  supervised to receive termination request from supervisors.
-- There is no way to guarantee that a supervisee is terminated if the
-  supervisor terminates unexpectedly, leading to orphaned processes.
-- There is no way to force the termination of a process, e.g. if it is
-  stuck in bad/corrupted state that is blocking other processes or
-  tying up system resources.
-
 ** Inspirations for supervision functionality
 
 Inspiration drawn from popular systems for building robust and fault tolerant distributed systems:
@@ -70,9 +59,20 @@ Inspiration drawn from popular systems for building robust and fault tolerant di
 - [[http://haskell-distributed.github.io/][Cloud Haskell]] has almost the same linking/monitoring mechanisms as Erlang, except that the semantics are slightly simpler, since process linking is unidirectional (see the sections on [[http://haskell-distributed.github.io/tutorials/3ch.html#monitoring-and-linking][monitoring and linking]] and [[http://haskell-distributed.github.io/tutorials/3ch.html#process-lifetime][process lifetime]] in the Cloud Haskell documentation)
 - [[https://akka.io/][Akka]] also uses a flavor of the linking and monitoring approach (see the section on [[https://doc.akka.io/libraries/akka-core/current/general/supervision.html][supervision and monitoring]] in the Akka documentation)
 
-** Designing a supervision API
+** Can we re-use Troupe's message passing features to implement it?
 
-1. Start by establishing the basic functionality, at first without considering security/IFC
+Troupe's current message passing mechanism alone cannot be relied on:
+- Processes may terminate unexpectedly due to e.g. run-time errors, meaning that they are not able
+  to send a message to their supervisor before terminating, and processes must be aware that they
+  are supervised to receive termination request from supervisors.
+- There is no way to guarantee that a supervisee is terminated if the supervisor terminates
+  unexpectedly, leading to orphaned processes.
+- There is no way to force the termination of a process, e.g. if it is stuck in bad/corrupted state
+  that is blocking other processes or tying up system resources.
+
+** Designing a security aware supervision API
+
+1. Start by establishing the basic functionality (at first without considering security/IFC)
 2. Refine the design to be secure by identifying potential issues
 3. Implement MVP
 
@@ -80,21 +80,22 @@ Inspiration drawn from popular systems for building robust and fault tolerant di
 
 To start off, a base API consisting of 3 primitives based on Erlang/Cloud Haskell/Akka could be as follows:
 - ~link : pid -> ()~: /Link/ the calling process (the "linker") to process ~pid~ (the "linkee"). If the linkee
-  terminates, for any reason, so does the linker (but not the other way around!)
-  - Contrary to Erlang, links are defined to be unidirectional, as
-    this simplifies the semantics. The linking mechanism in both Cloud Haskell and Akka is also unidirectional.
+  terminates, for any reason, so does the linker (but not the other way around!)[fn:1].
+  - Contrary to Erlang, links are defined to be unidirectional, as this simplifies the semantics.
+    The linking mechanism in both Cloud Haskell and Akka is also unidirectional.
     Additionally, unidirectional linking was also proposed as part of
     [[https://dl.acm.org/doi/10.1145/1863509.1863514][an effort to provide a simpler formalization of Erlang's
     semantics]].
-- ~monitor : pid -> monRef~: /Monitor/ process ~pid~. If ~pid~ terminates, the
-  calling process will receive a /termination message/ in the mailbox.
-  The message will contain a /reason/, which describes how ~pid~
-  terminated, e.g. normally or due to a run-time error.
-- ~terminate : pid -> ()~: Send a /termination signal/ to process ~pid~,
-  which will force the termination of ~pid~ (similar to Erlang's ~exit/2~,
-  Cloud Haskell's ~kill~ and Akka's ~stop~).
+    
+- ~monitor : pid -> monRef~: /Monitor/ process ~pid~. If ~pid~ terminates, the calling process will receive a /termination message/ in the mailbox.
+  The call returns a /monitor references/, which uniquely identifies the monitoring relationship.
+  The termination message will include the monitor reference, ID of the terminated process and the termination /reason/.
+  Termination may be normal or abnormal, e.g. due to a failure such as a run-time error.
+  If the termination reason is abnormal, the error (message) will also be included.
+  
+- ~terminate : pid -> ()~: /Terminate/ process ~pid~, which will force the termination of ~pid~ (similar to Erlang's ~exit/2~, Cloud Haskell's ~kill~ and Akka's ~stop~).
 
-With these primitives in hand, a very simple generic supervisor could look something like the following:
+With these primitives in hand, a very simple generic 1-child supervisor could look something like the following:
 #+BEGIN_SRC sml
 let fun supervise child_fun =
         let val sup_pid = self()
@@ -131,22 +132,23 @@ in
 end
 #+END_SRC
 
-**** Remote linking and monitoring
+[fn:1] Contrary to Erlang, the links are defined to be *unidirectional*, as this (arguably) simplifies the semantics/reasoning about linking behavior. The linking mechanism in both Cloud Haskell and Akka is also unidirectional. Additionally, unidirectional linking was also proposed as part of [[https://dl.acm.org/doi/10.1145/1863509.1863514][an effort to provide a simpler formalization of Erlang's semantics]].
 
-To be useful for supervision, the API should work both on a local and
-cross-node level (it may be useful to provide variants of the above
-that also take a node id, similar to the spawn function).
+**** Remote linking and monitoring functionality
 
-To facilitate this, there needs to be a notion of two nodes being
-"connected". In case of a disconnect, which may be due to the failure
-of a node or a network partition, local processes that are either
-linking to or monitoring processes on the disconnected node must be
-notified: The linked processes must be terminated, and the monitoring
-processes must receive a termination message.
+To be useful for supervision, the API should work both on a local and cross-node level.
 
-In practice, connections between nodes can be maintained through the
-use of periodic "heartbeats", which can be implemented (mostly) in the
-Troupe language itself.
+To facilitate this, there needs to be a notion of two nodes being "connected", in terms of linking/monitoring.
+Initiating a monitoring/linking relationship between processes on two nodes establishes the connection, if they were not already connected, and the connection is maintained as long as there is at least one active monitor/link[fn:2].
+
+In case of a disconnect, which may be due to the failure of a node or a network partition, monitoring/linking relationships between processes on the now disconnected nodes must be broken:
+- Processes that have linked themselves to a process on the disconnected node must be terminated.
+- Processes that are monitoring a process on the disconnected node must be notified (with failure reason being a disconnect).
+  
+It may be the case, e.g. due to network instability, that a disconnected node later rejoins the network, *without realizing that it was disconnected*, and it may still assume that links/monitors established in the previous connection are active.
+When this happens, disconnected node must be informed of the disconnect, such that the nodes agree on which monitoring/linking relationships (which may mean retroactively terminating links or informing monitors).
+
+[fn:2] In practice, connections between nodes can be maintained through the use of periodic "heartbeats", which can be implemented (mostly) in the Troupe language itself.
 
 **** Issues with v1
 
@@ -301,8 +303,9 @@ which might evolve unexpectedly.
 
 - /Incoming/ monitor/link request: If node n with trust level l_{n}, wants to monitor/link to local process p, only honor the request (i.e. send the termination signal/message back) if p terminates in context l_{p} such that l_{p} ⊑ l_{n} (additionally also take the level of the link into account)
 
-* TODO Resources
+* Resources
 
+- "Programming Erlang" (2nd Edition), Armstrong, 2013
 - [[https://dl.acm.org/doi/10.1145/1863509.1863514][A unified semantics for future Erlang]], Svensson, Fredlun & Benac-Earle, 2010
 - [[https://haskell-distributed.github.io/static/semantics.pdf][Cloud Haskell Semantics (draft pdf)]]
 - [[https://ieeexplore.ieee.org/abstract/document/1212703][Observational determinism for concurrent program security]], Zdancewic & Myers, 2003
