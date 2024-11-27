@@ -56,9 +56,11 @@ An effective and reliable supervision monitoring mechanism must, at minimum, sat
 ** Inspirations for supervision functionality
 
 Inspiration drawn from popular systems for building robust and fault tolerant distributed systems:
-- [[https://www.erlang.org/][Erlang]] relies heavily on /exit signals/ and the process linking/monitoring mechanisms for error handling, including the implementation of supervision (see sections on [[https://www.erlang.org/doc/system/robustness.html#error-handling][error handling]], [[https://www.erlang.org/doc/system/design_principles.html][the OTP design principles]] and [[https://www.erlang.org/doc/system/sup_princ.html][the supervision behavior]] in the Erlang system documentation)
+- [[https://www.erlang.org/][Erlang]] relies on process linking/monitoring mechanisms, explained below, for error handling, including the implementation of supervision (see sections on [[https://www.erlang.org/doc/system/robustness.html#error-handling][error handling]], [[https://www.erlang.org/doc/system/design_principles.html][the OTP design principles]] and [[https://www.erlang.org/doc/system/sup_princ.html][the supervision behavior]] in the Erlang system documentation)
 - [[http://haskell-distributed.github.io/][Cloud Haskell]] has almost the same linking/monitoring mechanisms as Erlang, except that the semantics are slightly simpler, since process linking is unidirectional (see the sections on [[http://haskell-distributed.github.io/tutorials/3ch.html#monitoring-and-linking][monitoring and linking]] and [[http://haskell-distributed.github.io/tutorials/3ch.html#process-lifetime][process lifetime]] in the Cloud Haskell documentation)
 - [[https://akka.io/][Akka]] also uses a flavor of the linking and monitoring approach (see the section on [[https://doc.akka.io/libraries/akka-core/current/general/supervision.html][supervision and monitoring]] in the Akka documentation)
+
+*** Linking and monitoring in Erlang
 
 ** Can we re-use Troupe's message passing features to implement it?
 
@@ -145,9 +147,6 @@ A discussion of the practical implementation details is postponed for now.
 [fn:2] In practice, connections between nodes can be maintained through the use of periodic "heartbeats", which can be implemented (mostly) in the Troupe language itself. The practical details.
 
 **** Issues with v1
-:properties:
-:custom_id: sec-api-v1-issues
-:end:
 
 The ~link~, ~monitor~ and ~terminate~ primitives introduce a new way for processes to interact, and this exposes a number of security issues.
 
@@ -248,7 +247,7 @@ The ~link~, ~monitor~ and ~terminate~ primitives introduce a new way for process
 
 *** Securing links, monitors and process termination (API, v2)
 
-Addressing the security related issues identified [[#sec-api-v1-issues][with the v1 API]].
+Addressing the security related issues identified [[#issues-with-v1][with version v1 of the API]].
 
 Both monitoring and linking can be seen as a "delayed" form of (indirect) message passing:
 - Monitoring/ linking to a process conceptually results in that process sending a termination signal/message to the monitor/linker, "just before it terminates"
