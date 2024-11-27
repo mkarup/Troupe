@@ -3,14 +3,17 @@
 #+OPTIONS: toc:2
 #+OPTIONS: f:t
 
-This design document serves as an overview for integrating a security aware supervision mechanism
-into the Troupe language. The intent is to identify requirements and challenges, including security
-considerations, and design such a mechanism, with the goal of developing an MVP/prototype. The
-supervision mechanism will enable processes to selectively monitor the lifecycle of other processes,
-link the lifecycle of two processes, detect failures, and implement custom recovery logic, while
+This document is meant to serve as an overview for integrating a security aware supervision mechanism into the Troupe language.
+The intent is to identify requirements and challenges, including security considerations, and design such a mechanism, with the goal of developing an MVP/prototype.
+The supervision mechanism will enable processes to selectively monitor the lifecycle of other processes, link the lifecycle of two processes, detect failures, and implement custom recovery logic, while
 preserving Troupe's security guarantees.
 
-*NOTE: The code snippets are meant to serve as illustrations/pseudo-code, and may not constitute complete programs, and syntax may not be correct.*
+*NOTE: The code snippets used throughout the document are meant to serve as illustrations/pseudo-code, and may not constitute complete programs, and syntax may not be correct.*
+
+* Table of contents
+
+- [[#introduction][Introduction]]
+- [[#approach][Approach]]
 
 * Introduction
 
