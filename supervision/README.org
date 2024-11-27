@@ -13,7 +13,13 @@ preserving Troupe's security guarantees.
 * Table of contents
 
 - [[#introduction][Introduction]]
+  - [[#motivation][Motivation]]
+  - [[#requirements][Requirements]]
+  - [[#challenges][Challenges]]
 - [[#approach][Approach]]
+  - [[#inspirations-for-supervision-functionality][Inspirations for supervision functionality]]
+  - [[#designing-a-security-aware-supervision-api][Designing a security aware supervision API]]
+- [[#resources][Resources]]
 
 * Introduction
 
@@ -65,7 +71,13 @@ Inspiration drawn from popular systems for building robust and fault tolerant di
 
 *** Linking and monitoring in Erlang
 
-** Can we re-use Troupe's message passing features to implement it?
+** Designing a security aware supervision API
+
+1. Start by establishing the basic functionality (at first without considering security/IFC)
+2. Refine the design to be secure by identifying potential issues
+3. Implement MVP
+
+*** Can we re-use Troupe's message passing features to implement it?
 
 Troupe's current message passing mechanism alone cannot be relied on:
 - Processes may terminate unexpectedly due to e.g. run-time errors, meaning that they are not able
@@ -75,12 +87,6 @@ Troupe's current message passing mechanism alone cannot be relied on:
   unexpectedly, leading to orphaned processes.
 - There is no way to force the termination of a process, e.g. if it is stuck in bad/corrupted state
   that is blocking other processes or tying up system resources.
-
-** Designing a security aware supervision API
-
-1. Start by establishing the basic functionality (at first without considering security/IFC)
-2. Refine the design to be secure by identifying potential issues
-3. Implement MVP
 
 *** Basic supervision API, v1
 
@@ -381,9 +387,6 @@ Similar to linking, this slightly "weakens" the guarantees on the monitoring rel
   Because of unpredictable scheduling and networking, the supervisor may have died before the child has had a chance to call ~link~, leading to an orphaned process.
   Similarly, the child may have died before the supervisor has had a chance to ~monitor~, and without feedback will assume that the process is alive.
   Both of these cases can leave a system in an unpredictable, faulty state, which somewhat defeats the purpose supervision.
-
-
-
 
 **** TODO Termination
 
