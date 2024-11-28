@@ -1,7 +1,6 @@
 #+TITLE: Process supervision and monitoring in Troupe
 #+STARTUP: fnadjust
-#+OPTIONS: toc:2
-#+OPTIONS: f:t
+#+OPTIONS: toc:2 f:t todo:t
 
 This document is meant to serve as an overview for integrating a security aware supervision mechanism into the Troupe language.
 The intent is to identify requirements and challenges, including security considerations, and design such a mechanism, with the goal of developing an MVP/prototype.
@@ -71,6 +70,30 @@ Inspiration drawn from popular systems for building robust and fault tolerant di
 
 *** Linking and monitoring in Erlang
 
+**** Links and exit signals
+
+Erlang provides a mechanism for /linking/ two processes together (the primitive/built-in ~link~ function).
+When two processes are linked and one of them terminates, the other will be sent an /exit signal/, which is essentially a special type of message, and when the signal arrives at the other process, it will also terminate. A process can be linked to multiple other processes, forming networks of linked processes: Once one of them dies, the exit signal propagates throughout the network, potentially terminating all the processes.
+
+It's important to note that the handling of exit signals is done by the Erlang runtime, including the termination of linked processes. This means that a linked process may be killed by the runtime at any point in a program, if the other end of the link dies.
+
+In addition to the default link behavior of "mutually assured destruction", Erlang also provides a mechanism that allows programmers to specify how a process should act on incoming exit signals, by allowing it to "trap exits"[fn:1].
+Concretely, this is done by setting a special flag on the current process: ~process_flag(trap_exit, true)~.
+If the ~trap_exit~ flag is set, incoming exit signals will be converted to regular Erlang messages of the form ~{'EXIT', from, reason}~ and placed in the mailbox, and they can be received like any other message. The ~reason~ value describes how the sender of the signal terminated, e.g. due to a run-time error.
+
+The ability to link processes and handle exit signals from other processes is the main building block of Erlang’s supervisors.
+
+A supervisor process manages a number of child processes by starting, re-starting and stopping them, according to some policy.
+The supervisor process is configured to trap exit signals, and is able to act on the termination of a child process via links, e.g. by re-starting it.
+Due to the link, if the supervisor somehow terminates, so do the children, which means that there is no risk of child processes being orphaned.
+
+[fn:1] In Erlang terminology, a process that is trapping exits is also called a /system process/.
+
+**** Monitors
+
+In addition to links, Erlang also provides a mechanism that allows a process to "monitor" the lifetime of another, meaning that it will be notified (with a message) when the other process terminates.
+Note that this is essentially the same as allowing the process to trap exit signals and then linking to the other process, except that monitoring is unidirectional and doesn't affect how incoming exit signals are treated. 
+
 ** Designing a security aware supervision API
 
 1. Start by establishing the basic functionality (at first without considering security/IFC)
@@ -92,7 +115,7 @@ Troupe's current message passing mechanism alone cannot be relied on:
 
 To start off, a base API consisting of 3 primitives based on Erlang/Cloud Haskell/Akka could be as follows:
 - ~link : pid -> ()~: /Link/ the calling process (the "linker") to process ~pid~ (the "linkee"). If the linkee
-  terminates, for any reason, so does the linker (but not the other way around!)[fn:1].
+  terminates, for any reason, so does the linker (but not the other way around!)[fn:2].
 
 - ~monitor : pid -> monRef~: /Monitor/ process ~pid~. If ~pid~ terminates, the calling process will receive a /termination message/ in the mailbox.
   The call returns a /monitor references/, which uniquely identifies the monitoring relationship.
@@ -101,6 +124,8 @@ To start off, a base API consisting of 3 primitives based on Erlang/Cloud Haskel
   If the termination reason is abnormal, the error (message) will also be included.
 
 - ~terminate : pid -> ()~: /Terminate/ process ~pid~, which will force the termination of ~pid~ (similar to Erlang's ~exit~, Cloud Haskell's ~kill~ and Akka's ~stop~).
+  The rationale for providing a way to forcefully terminate another process is to enable a supervisor kill a child process that doesn't respond to requests to shut down gracefully.
+
 
 With these primitives in hand, a very simple generic 1-child supervisor could look something like the following:
 #+BEGIN_SRC sml
@@ -134,7 +159,7 @@ in
 end
 #+END_SRC
 
-[fn:1] Contrary to Erlang, the links are defined to be *unidirectional*, as this (arguably) simplifies the semantics/reasoning about linking behavior. The linking mechanism in both Cloud Haskell and Akka is also unidirectional. Additionally, unidirectional linking was also proposed as part of [[https://dl.acm.org/doi/10.1145/1863509.1863514][an effort to provide a simpler formalization of Erlang's semantics]].
+[fn:2] Contrary to Erlang, the links are defined to be *unidirectional*, as this (arguably) simplifies the semantics/reasoning about linking behavior. The linking mechanism in both Cloud Haskell and Akka is also unidirectional. Additionally, unidirectional linking was also proposed as part of [[https://dl.acm.org/doi/10.1145/1863509.1863514][an effort to provide a simpler formalization of Erlang's semantics]].
 
 **** Remote linking and monitoring functionality
 
@@ -142,7 +167,7 @@ To be useful for supervision, the API should work both on a local and cross-node
 
 To facilitate this, there needs to be a notion of two nodes being /connected/, in relation to linking/monitoring.
 - Initiating a monitoring/linking relationship between processes (calling ~monitor~ or ~link~) on two different nodes establishes the connection, if they were not already connected.
-- The connection is maintained as long as there is at least one active monitor/link[fn:2].
+- The connection is maintained as long as there is at least one active monitor/link[fn:3].
 
 In case of a disconnect, which may be due to the failure of a node or a network partition, monitoring/linking relationships between processes on the now disconnected nodes must be broken:
 - Processes that have linked themselves to a process on the disconnected node must be terminated.
@@ -153,7 +178,7 @@ When this happens, disconnected node must be informed of the disconnect, such th
 
 A discussion of the practical implementation details is postponed for now.
 
-[fn:2] In practice, connections between nodes can be maintained through the use of periodic "heartbeats", which can be implemented (mostly) in the Troupe language itself. The practical details.
+[fn:3] In practice, connections between nodes can be maintained through the use of periodic "heartbeats", which can be implemented (mostly) in the Troupe language itself. The practical details.
 
 **** Issues with v1
 
@@ -285,7 +310,7 @@ in
    if secret then
      1 / 0
    else
-     (* code that doesn't causes p to diverge *)
+     (* code that doesn't cause p to diverge *)
 end
 
 (* ... *)
@@ -358,49 +383,75 @@ end
 
 Similar to linking, this slightly "weakens" the guarantees on the monitoring relationship, in the sense that whether a termination message is delivered depends on the PC/blocking level of a process, which might evolve unexpectedly throughout program execution, although this can also be remedied through explicit declassification.
 
-**** TODO Monitoring or linking to an "already dead" process
+**** Monitoring or linking to a dead process 
 
-- Semantics in other systems
-- Possible options
-  - Ignore; nothing happens
-  - Enforce (asynchronously) immediately
-    - Links are terminated
-    - Monitors receive a message (termination reason "unknown", or...?)
-- Ignoring requests may leave systems in a bad state (example...)
-- If link/monitor semantics are applied retroactively, it is necessary to know in what context it terminated, otherwise it may be possible to leak secret data:
-  Consider process P running the code:
+Another question is how to handle when a process tries to monitor or link to a process no longer exists (or never existed).
+In Erlang, this has the same effect as triggering the effect of the monitor/link, as if the process had just terminated:
+- A process trying to establish a link to a dead process will receive an exit signal, causing it terminate (if it is not trapping exit signals)
+- A process trying to monitor a dead process will receive a notification. The reason for termination given in the notification is ~noproc~, i.e. the runtime has no knowledge of the process.
+- Additionally, the above is also what happens if the process resides on a remote Erlang node that cannot be reached, i.e. there is no connection.
+
+This behavior is useful in scenarios where a failure may have occurred as part of the spawning/initialization of a new process, and other processes, e.g. the parent/supervisor, has not had a chance to establish the monitor/link yet. 
+
+Safely handling this requires a little extra care.
+In cases where an adversary has obtained the ID of a process that may have already terminated in a secret context, any retroactive effects of trying to link/monitor it should be subject to the same restrictions as if the process is still alive:
+If the confidentiality level of the link/monitor is not high enough, there should be no observable effect.
+As an example, consider a process p running the code
   #+begin_src sml :eval no
-  let fun loop () =
-          if secret then
-            ()
-          else
+  if secret then
+    ()
+  else
+    let fun loop () =
             loop ()
-  in
-    loop ()
-  end
+    in
+      loop ()
+    end
   #+end_src
-  Assume that ~secret = true~, and that P has been scheduled at least once such that it has terminated - it is no longer in the process pool.
-  Now consider a process q that has obtained the ID of P, that is scheduled to run /after/ P has terminated, and q evaluates ~link (P, l)~.
-  What should happen when the call to link happens?
-  If ~l~ ⊑ labelOf(~secret~), then q is allowed to know that P has terminated, in which case q should also terminate, but this requires the runtime to preserve information about processes /after/ they have terminated, their blocking level at time of termination (and possibly the termination reason, to provide meaningful information to monitors).
-  One example of why it is important to provide this information is when a supervisor (re-)spawns a child process.
-  Because of unpredictable scheduling and networking, the supervisor may have died before the child has had a chance to call ~link~, leading to an orphaned process.
-  Similarly, the child may have died before the supervisor has had a chance to ~monitor~, and without feedback will assume that the process is alive.
-  Both of these cases can leave a system in an unpredictable, faulty state, which somewhat defeats the purpose supervision.
+Assume that another process q has the ID of p and waits a sufficient amount of time that p (with high probability) has had a chance to run, and then tries to monitor p, at level l.
+Whether p is still alive depends on the value of ~secret~.
+Suppose ~secret = true~, then q is only allowed to know that p has terminated if ~labelOf(secret)~ ⊑ l.
+
+To accurately enforce this, it is necessary to keep information about which processes have terminated and in what context.
+This is not practical in a real system that may be running indefinitely, as it may eventually exhaust the available memory/storage capacity, and opens the door for denial-of-service attacks for the same reason.
+
+It would be sound, from an IFC perspective, to just silently ignore requests to link/monitor a dead/unknown process regardless of the confidentiality level provided (perhaps with the exception of something like the highest level ⊤), but this may make the link/monitor less useful in practice, e.g. in a supervision setting.
+
+If supervision is the main use case, where it's important to catch and respond to failures may happen in the spawn/initialization phase, then a compromise may be keep information about dead processes around for a limited amount of time, and make this configurable per node.
+When the information about a dead process is eventually forgotten, link/monitor request may be silently ignored.
 
 **** TODO Termination
 
-- Termination poses both a confidentiality and availability issue, if any process is allowed to terminate any other process
-- To simplify both the low level API and the security analysis of it, process termination can be provided in a restricted form.
-- The main use case is supervision, in which a supervisor will have responsibility over a number of child processes, e.g. spawning and re-spawning them.
-- In such a scenario, it makes sense to allow the parent of a process to terminate a child.
-- This can be done programmatically, using the link primitive.
+- Termination is a very powerful action: It poses both a confidentiality and availability issue, if any process is allowed to terminate any other process, as identified in the [[#issues-with-v1][issues with version v1 of the API]].
+- If the main use case is supervision, it is reasonable to somehow provide the supervisor/parent of a process with the ability to terminate a child.
+- Instead of exposing a termination primitive, this can be achieved by programming a "kill switch" as part of the spawning process, using the ~link~ primitive, as sketched below
 
-**** Cross-node monitoring/linking requests
 
-- /Outgoing/ monitor/link request: If ~p~ in context l_{p}, wants to monitor/link to ~q~ on node ~n~, and node ~n~ is trusted to level l_{n}, only allow the /outbound/ request if l_{p} ⊑ l_{n} (additionally also take the level of the link into account), otherwise terminate with IFC violation (since it's equivalent of sending a message)
+#+begin_src sml :eval no
+let val nonce = mkuuid ()
+    fun kill_switch () = receive [ hn ("KILL", n) when n = nonce => () ]
+    val kill_switch_pid = spawn kill_switch
+    val child_pid = spawn (fn () =>
+                              (* Assume that l is the current PC/blocking level, and that
+                                 the PC/blocking level of the child stays at level l
+                                 (otherwise, if sufficient authority is available the
+                                 blocking level could be declassified after the link is
+                                 established) *)
+                              let val _ = link (kill_switch_pid, l)
+                              in
+                                (* ... *)
+                              end)
+in
+  (* ... *)
+  send (kill_switch_pid, ("KILL", nonce)) (* Terminate the child *)
+end
+#+end_src
+Given this, it may makes sense to simplify the API by not including a ~terminate~ primitive, for now.
 
-- /Incoming/ monitor/link request: If node n with trust level l_{n}, wants to monitor/link to local process p, only honor the request (i.e. send the termination signal/message back) if p terminates in context l_{p} such that l_{p} ⊑ l_{n} (additionally also take the level of the link into account)
+**** TODO Cross-node monitoring/linking requests
+
+- /Outgoing/ monitor/link request: If process p in context l_{p}, wants to monitor/link to process q on node n, and node n is trusted to level l_{n}, only allow the /outbound/ request if l_{p} ⊑ l_{n} (additionally also take the level of the monitor/link into account), otherwise terminate with IFC violation (since it's equivalent to sending a message)
+
+- /Incoming/ monitor/link request: If node n with trust level l_{n}, wants to monitor/link to local process p, only honor the request (i.e. send the termination signal/message back) if p terminates in context l_{p} such that l_{p} ⊑ l_{n} (additionally also take the level of the monitor/link into account)
 
 * Resources
 
