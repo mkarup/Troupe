@@ -18,6 +18,9 @@ preserving Troupe's security guarantees.
 - [[#approach][Approach]]
   - [[#inspirations-for-supervision-functionality][Inspirations for supervision functionality]]
   - [[#designing-a-security-aware-supervision-api][Designing a security aware supervision API]]
+    - [[#can-we-re-use-troupes-message-passing-features-to-implement-it][Can we re-use Troupe's message passing features to implement it?]]
+    - [[#basic-supervision-api-v1][Basic supervision API, v1]]
+    - [[#securing-links-monitors-and-process-termination-api-v2][Securing links, monitors and process termination (API, v2)]]
 - [[#resources][Resources]]
 
 * Introduction
