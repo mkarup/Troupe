@@ -12,7 +12,8 @@ yarn:
 rt:
 	cd rt; tsc 
 service:
-	$(COMPILER) ./trp-rt/service.trp -l	
+	$(COMPILER) ./trp-rt/service.trp -l
+	$(COMPILER) ./trp-rt/monitor.trp -l
 libs:
 	$(COMPILER) ./lib/nsuref.trp -l
 	$(COMPILER) ./lib/string.trp -l

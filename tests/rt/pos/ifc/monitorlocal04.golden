@@ -1,0 +1,4 @@
+2024-12-11T12:25:44.718Z [RTM] [32minfo[39m: Skipping network creation. Observe that all external IO operations will yield a runtime error.
+Runtime error in thread 68465477-9557-4dcb-89b0-694a7ff379f7@{}%{}
+>> value 1 is not a string
+>>> Main thread finished with value: ("DONE"@{secret}%{secret}, "cdd2f347-0766-40fb-9e57-c2485bfa5f79"@{secret}%{secret}, 68465477-9557-4dcb-89b0-694a7ff379f7@{secret}%{secret}, (1@{secret}%{secret}, "value 1 is not a string"@{secret}%{secret})@{secret}%{secret})@{secret}%{secret}

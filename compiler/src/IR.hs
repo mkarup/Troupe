@@ -328,7 +328,7 @@ instance WellFormedIRCheck IRExpr where
                      , "toStringL"
                      , "toString"
                      , "whereis"                 
-                                      
+                     , "monitor"
                      ]
         then return ()
         else throwError $ "bad base function: " ++ fname

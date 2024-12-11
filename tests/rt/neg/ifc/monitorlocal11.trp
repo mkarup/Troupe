@@ -1,0 +1,19 @@
+let val secret = false raisedTo `{secret}`
+    val p = spawn (fn () =>
+                      if secret then
+                        receive [ hn _ => () ]
+                      else
+                        receive [ hn _ => 1 ^ "crash" ]
+                  )
+    val reason = 
+        let pini authority
+            val monRef = monitorlocal (p, `{secret}`)
+            val _ = send (p, ())
+            val reason = rcvp (`{secret}`, [ hn ("DONE", _, _, reason) => reason ])
+        in
+          reason
+        end
+in
+  ladv(`{}`, reason)
+end
+  

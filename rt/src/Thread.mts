@@ -354,8 +354,8 @@ export class Thread {
     
 
 
-    addMonitor (pid, r) {        
-        this.monitors[r.val] = {pid: pid, uuid: r} 
+    addMonitor (pid, r, l) {
+        this.monitors[r.val] = {pid: pid, uuid: r, lev: l};
     }
 
     tailCall (f, x) {

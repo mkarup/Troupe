@@ -416,6 +416,16 @@ bulletProofSigint();
 
 
 async function loadServiceCode() {
+  let mon_input = await fs.promises.readFile(process.env.TROUPE + '/trp-rt/out/monitor.js', 'utf8')
+  let M: any = new Function('rt', mon_input)
+  let monitor_service = new M(__userRuntime);
+
+  await __userRuntime.linkLibs(monitor_service)
+
+  __userRuntime.setLibloadMode()
+  let mon_table = monitor_service.export({__dataLevel:levels.BOT}).val.toArray()
+  __userRuntime.setNormalMode()
+
   let input = await fs.promises.readFile(process.env.TROUPE + '/trp-rt/out/service.js', 'utf8')
   let S: any = new Function('rt', input)
   let service = new S(__userRuntime);
@@ -423,7 +433,7 @@ async function loadServiceCode() {
   await __userRuntime.linkLibs(service)
 
   __userRuntime.setLibloadMode()
-  let table = service.export({__dataLevel:levels.BOT}).val.toArray()
+  let table = service.export({__dataLevel:levels.BOT}).val.toArray().concat(mon_table);
   __userRuntime.setNormalMode()
 
   for (let i = 0; i < table.length; i++) {

@@ -46,11 +46,10 @@ let fun service (authority, options) =
     fun receive hns =
         let val pc = _pc () 
          in rcv (pc, pc, hns)
-        end 
-     
- 
-     fun servicetest x = x + 5 
+        end
 
+
+    fun servicetest x = x + 5
 
 
 in [("service", service)

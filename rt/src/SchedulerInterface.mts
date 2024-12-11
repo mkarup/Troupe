@@ -12,6 +12,7 @@ export interface SchedulerInterface {
     blockThread(__currentThread: Thread);
     isAlive(toPid: any);
     getThread(toPid: any);
+    getRecentlyTerminatedThread(tid: any);
     unblockThread(toPid: any);
     schedule(fun: any, args: any[], namespace: any);
     __currentThread: Thread;

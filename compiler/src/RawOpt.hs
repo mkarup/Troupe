@@ -389,23 +389,23 @@ isLiveInstFwd (lvals, rvars) i =
 
 
 filterInstBwd :: [RawInst] -> ([RawInst], [RawInst])
-filterInstBwd ls = 
-  let f (pc, bl) (i:is) acc = 
-        case i of 
-          SetState MonPC _ -> 
-            if pc /= Nothing
-                  then f (pc, bl) is acc
-                  else f (Just i, bl) is acc
-          SetState MonBlock _ -> 
-            if bl /= Nothing 
-                  then f (pc, bl) is acc 
-                  else f (pc, Just i) is acc
-          _ -> f (pc, bl) is (i:acc)
-      f (pc, bl) [] acc = 
-        let fromJ (Just x) = [x]
-            fromJ Nothing = []
-         in (acc, concat $ map fromJ [pc, bl]) in 
-  f (Nothing, Nothing) (reverse ls) []
+filterInstBwd ls = (ls, [])
+  -- let f (pc, bl) (i:is) acc = 
+  --       case i of 
+  --         SetState MonPC _ -> 
+  --           if pc /= Nothing
+  --                 then f (pc, bl) is acc
+  --                 else f (Just i, bl) is acc
+  --         SetState MonBlock _ -> 
+  --           if bl /= Nothing 
+  --                 then f (pc, bl) is acc 
+  --                 else f (pc, Just i) is acc
+  --         _ -> f (pc, bl) is (i:acc)
+  --     f (pc, bl) [] acc = 
+  --       let fromJ (Just x) = [x]
+  --           fromJ Nothing = []
+  --        in (acc, concat $ map fromJ [pc, bl]) in 
+  -- f (Nothing, Nothing) (reverse ls) []
 
 
 -- | This optimization for 'Call' moves instructions from the continuation to before the 'Call'.

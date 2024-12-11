@@ -10,7 +10,7 @@ import { LVal } from './Lval.mjs'
 import {ProcessID, pid_equals} from './process.mjs'
 import SandboxStatus from './SandboxStatus.mjs'
 import  {ThreadError, TroupeError} from './TroupeError.mjs'
-import  {lub} from './options.mjs'
+import  { lub, flowsTo } from './options.mjs'
 // import * as levels from './options'
 import yargs from 'yargs';
 const showStack = yargs.argv.showStack
@@ -20,6 +20,7 @@ const info = x => logger.info(x)
 const debug = x => logger.debug(x)
 
 const STACKDEPTH = 150;
+const KEEP_TERMINATED_MS = 0; // How long to keep context (PC/BL) about dead processes around (0 = don't keep a record)
 
 let TerminationStatus = {
     OK: 0,
@@ -31,6 +32,7 @@ export class Scheduler implements SchedulerInterface {
     __funloop: Thread[];
     __blocked: any[];
     __alive: {};
+    __recentlyTerminated: {};
     __currentThread: Thread;
     stackcounter: number;
     __unit: any;
@@ -44,6 +46,7 @@ export class Scheduler implements SchedulerInterface {
         this.__funloop = new Array()
         this.__blocked = new Array()
         this.__alive = {} // new Set();
+        this.__recentlyTerminated = {};
         
         this.__currentThread = null; // current thread object
 
@@ -71,9 +74,24 @@ export class Scheduler implements SchedulerInterface {
         // console.log (`The number of blocked threads is ${this.__blocked.length}`)
     }
 
+    __addRecentlyTerminatedThread(t: Thread) {
+        if (KEEP_TERMINATED_MS) {
+            let death_timestamp = Date.now();
+
+            this.__recentlyTerminated[t.tid.val.toString()] = {pid: t.tid, pc: t.pc, bl: t.bl, death_timestamp: death_timestamp };
+
+            // maybe not a good idea? should this be part of the main loop? (race conditions?)
+            setTimeout(() => {
+                delete this.__recentlyTerminated[t.tid.val.toString()];
+            }, KEEP_TERMINATED_MS);
+        }
+    }
+
     done  ()  {            
-        this.notifyMonitors();
+        this.raiseCurrentThreadPCToBlockingLev(); // Is this necessary?
+        this.notifyMonitors(this.__currentThread);
         // console.log (this.__currentThread.processDebuggingName, this.currentThreadId.val.toString(), "done")
+        this.__addRecentlyTerminatedThread(this.__currentThread);
         delete this.__alive [this.currentThreadId.val.toString()];              
     }
 
@@ -84,7 +102,8 @@ export class Scheduler implements SchedulerInterface {
                                lub(this.__currentThread.bl, this.__currentThread.r0_lev),
                                lub(this.__currentThread.bl, this.__currentThread.r0_tlev))
 
-        this.notifyMonitors ();
+        this.notifyMonitors (this.__currentThread);
+        this.__addRecentlyTerminatedThread(this.__currentThread);
 
         delete this.__alive[this.currentThreadId.val.toString()];            
         console.log(">>> Main thread finished with value:", retVal.stringRep());
@@ -94,21 +113,36 @@ export class Scheduler implements SchedulerInterface {
         }
         return null;
     }
-    
-    notifyMonitors (status = TerminationStatus.OK, errstr = null) {
-        let ids = Object.keys (this.__currentThread.monitors);
+
+    notifyMonitors(thread: Thread, status = TerminationStatus.OK, errstr = null) {
+        let ids = Object.keys (thread.monitors);
         for ( let i = 0; i < ids.length; i ++ ) {
             let id = ids[i];
+            let monLev = thread.monitors[id].lev;
+            let monPid = thread.monitors[id].pid;
+            if (!flowsTo(thread.bl, monLev.val) || !this.isAlive(monPid)) {
+                debug(`Thread ${monPid.val.toString()} not notified of thread ${thread.tid.val.toString()}'s termination (terminated with blocking level ${thread.bl.stringRep()}, greater than monitor level ${monLev.val.stringRep()})`);
+                continue;
+            }
+
             let toPid =
-                this.__currentThread.mkCopy(this.__currentThread.monitors[id].pid);
+                thread.mkValWithLev(monPid.val, monLev.val);
             let refUUID =
-                this.__currentThread.mkCopy(this.__currentThread.monitors[id].uuid);
-            let thisPid = this.__currentThread.mkCopy(this.__currentThread.tid);
-            let statusVal = this.__currentThread.mkVal ( status ) ;
+                thread.mkValWithLev(thread.monitors[id].uuid.val, monLev.val);
+            let thisPid = thread.mkValWithLev(thread.tid.val, monLev.val);
+            let statusVal = thread.mkValWithLev ( status, monLev.val ) ;
             let reason = TerminationStatus.OK == status ? statusVal :
-                this.__currentThread.mkVal (mkTuple ( [statusVal,  this.__currentThread.mkVal (errstr)] ));
-            let message = this.__currentThread.mkVal (mkTuple ([ this.__currentThread.mkVal("DONE"), refUUID, thisPid, reason]))
+                thread.mkValWithLev (mkTuple ( [statusVal,  thread.mkValWithLev (errstr, monLev.val)] ), monLev.val);
+
+            let message = thread.mkValWithLev (mkTuple ([ thread.mkVal("DONE"), refUUID, thisPid, reason]), monLev.val)
+
+            let _pc = thread.pc;
+            // temporarily raise thread's pc for sending at monitor level
+            thread.pc = monLev.val;
             this.rtObj.sendMessageNoChecks ( toPid, message , false) // false flag means no need to return in the process
+            // lower it again, if there are more monitors that need to be notified, and they're at a different level
+            thread.pc = _pc;
+            debug(`Thread ${monPid.val.toString()} notified of thread ${thread.tid.val.toString()}'s termination (terminated with blocking level ${thread.bl.stringRep()}, less than monitor level ${monLev.val.stringRep()})`);            
         }
     }
 
@@ -238,9 +272,18 @@ export class Scheduler implements SchedulerInterface {
         return this.__alive[tid.val.toString()];
     }
 
+    getRecentlyTerminatedThread (tid) {
+        return this.__recentlyTerminated[tid.val.toString()];
+    }
 
     stopThreadWithErrorMessage (t:Thread, s:string ) {
-        this.notifyMonitors(TerminationStatus.ERR, s) ;
+        this.notifyMonitors(t, TerminationStatus.ERR, s) ;
+        this.__addRecentlyTerminatedThread(t);
+        // If thread is currently scheduled
+        // (the continuation is queud in the funloop)
+        // make sure the continuations are not executed
+        // OBS: Seems very hacky... probably a better way to handle this
+        t.next = () => { };
         delete this.__alive [t.tid.val.toString()];
     }
 

@@ -38,7 +38,16 @@ export function BuiltinSpawn<TBase extends Constructor<UserRuntimeZero>>(Base: T
                 } else {
                     assertIsNode(arg[0]);
                     assertIsFunction(arg[1]);
-                    (async () => this.runtime.spawnAtNode(arg[0], arg[1]))()
+                    const tid = this.runtime.$t.tid.val;
+                    (async () => this.runtime.spawnAtNode(arg[0], arg[1]))().catch(err => {
+                        // If there is an exception in the async call, it isn't caught by the
+                        // scheduler, and so crashes the runtime
+                        let t = this.runtime.__sched.__alive[tid.toString()];
+                        if (t) {
+                            err.handleError(this.runtime.__sched);
+                            __sched.resumeLoopAsync();
+                        }
+                    });
 
                 }
             } else {

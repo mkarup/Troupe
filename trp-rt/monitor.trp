@@ -1,0 +1,201 @@
+let val HEARTBEAT_INTERVAL            = 5 * 1000 (* send a heartbeat every 5 seconds *)
+    val MAX_HEARTBEAT_WINDOW          = 30 * 1000 (* timeout if no heartbeat has been received within 30 seconds *)
+    val CLEAR_OLD_TIMEOUTS_INTERVAL   = 1 * 60 * 1000 (* clear old timeout messages every minute *)
+    val MAX_CLEAR_OLD_TIMEOUTS_WINDOW = 50 (* spend at most 50 ms on clearing old invalid timeout messages *)
+    val debug = false
+
+    fun debugprint s =
+        if debug then
+          _debug(s)
+        else
+          ()
+
+    fun timeout_with_message to nonce msg interval =
+        spawn (fn () => sleep interval; send (to, (msg, nonce)))
+
+    fun send_on_interval pid msg interval stop =
+        let val nonce = mkuuid ()
+            fun f () =
+                send (pid, msg);
+                timeout_with_message (self()) nonce () interval;
+                receive [ hn ((), n) when n = nonce => f ()
+                        , hn m when m = stop => debugprint "Received request stop"
+                        ]
+        in
+          spawn f
+        end
+
+    fun receive_with_timeout hns nonce interval timeout_callback =
+          timeout_with_message (self ()) nonce "TIMEOUT" interval;
+          receive ((hn ("TIMEOUT", n) when n = nonce => timeout_callback ()) :: hns)
+
+    fun filter_message f =
+        receive [ hn m when f m => m, hn _ => () ]
+
+    fun clear_old_timeouts nonce clear_nonce =
+        let fun f ("TIMEOUT", n) = ((n = nonce) = false)
+              | f ("CLEAR_TIMEOUT", n) = true
+              | f _ = false
+
+            fun loop () =
+                let val m = filter_message f
+                in case m of
+                       ("CLEAR_TIMEOUT", _) => ()
+                     | ("TIMEOUT", _) => debugprint "cleared old timeout msg"; loop ()
+                     | _ => loop ()
+                end
+
+        in
+          (* Try filtering out old no longer valid timeout msgs from self *)
+          timeout_with_message (self ()) clear_nonce "CLEAR_TIMEOUT" MAX_CLEAR_OLD_TIMEOUTS_WINDOW;
+          loop ()
+        end
+
+    fun heartbeat_manager to key hns timeout_callback =
+        let val my_pid = self ()
+            val stop_nonce = mkuuid ()
+            val clear_nonce = mkuuid()
+            val start_time = getTime()
+            (* Send heartbeats at regular intervals *)
+            val heartbeat_sender = send_on_interval to ("HEARTBEAT", key) HEARTBEAT_INTERVAL ("STOP", stop_nonce)
+
+
+            fun loop () =
+                let val nonce = mkuuid ()
+                    val _ = debugprint ("Time since starting connection: " ^ (toString (round ((getTime () - start_time) / 1000))) ^ " ms")
+                in
+                  receive_with_timeout
+                    ((hn ("HEARTBEAT", k) when k = key =>
+                     debugprint "received heartbeat"; loop ())
+                    :: (hn ("CLEAR_TIMEOUTS", n) when n = clear_nonce =>
+                        debugprint "clearing old timeouts"; clear_old_timeouts nonce clear_nonce; loop ())
+                    :: hns)
+                    nonce
+                    MAX_HEARTBEAT_WINDOW
+                    (fn () => debugprint "Timeout out waiting for heartbeat"; timeout_callback ())
+                end
+
+            (* Minor detail: Since we interrupt receives if
+               no heartbeat has been received in a while
+               by sending timeout messages to ourselves
+               and a new timer is started on every receive,
+               spend some time once in a while to clear out
+               the old timeout messages that are no longer valid
+               to avoid overflowing the mailbox
+               in case of a long running connection
+             *)
+            val clear_timeouts_sender =
+                send_on_interval (self ())
+                                 ("CLEAR_TIMEOUTS", clear_nonce)
+                                 CLEAR_OLD_TIMEOUTS_INTERVAL
+                                 ("STOP", stop_nonce)
+
+        in
+          loop ();
+          send (heartbeat_sender, ("STOP", stop_nonce));
+          send (clear_timeouts_sender, ("STOP", stop_nonce))
+        end
+
+    fun termination_handler f r p =
+        hn ("DONE", r', p', reason) when r' = r andalso p' = p => f reason
+
+    fun remote_monitor_proxy loc_proxy pid lev conn_key =
+      let val _ = _setProcessDebuggingName ("remote monitor proxy for " ^ toString pid)
+          (* set up a local monitor *)
+          val mref  = monitorlocal (pid, lev)
+
+          (* define a message handler that forwards
+             a termination message from the
+             local process that is being monitored
+             to the remote proxy
+           *)
+          val handler =
+              termination_handler
+                (fn reason => send (loc_proxy, ("DONE", conn_key, pid, reason)))
+                mref
+                pid
+
+          (* Send an acknowledgement back to local proxy *)
+          val _ = send (loc_proxy, ("MONITOR_ACK", conn_key))
+      in
+        debugprint "Remote proxy sent ack back";
+        heartbeat_manager loc_proxy conn_key [ handler ] (fn () => ())
+      end
+
+    fun local_monitor_proxy caller nodeid pid lev mref =
+        let val _ = _setProcessDebuggingName ("local monitor proxy for " ^ toString pid)
+            val my_pid = self ()
+            (* Key to use for connection with remote *)
+            val conn_key = mkuuid ()
+
+            (* Spawn the remote monitor proxy *)
+            val _ = debugprint "Local proxy spawning remote proxy"
+            val remote_proxy = spawn (nodeid, fn () => remote_monitor_proxy my_pid pid lev conn_key)
+
+          (* define a message handler that forwards
+             a termination message from the
+             remote proxy to the local caller
+             (the process that initiated the monitoring)
+           *)
+            val handler = termination_handler
+                            (fn reason => send (caller, ("DONE", mref, pid, reason)))
+                            conn_key
+                            pid
+
+            (* wait for acknowledgement *)
+            val _ = debugprint "Local proxy waiting for ack"
+            val nonce = mkuuid ()
+            val ok = receive_with_timeout
+                       [ hn ("MONITOR_ACK", k) when k = conn_key => true ]
+                       nonce
+                       2500
+                       (fn () => false)
+        in
+          if ok then
+            send (caller, ("MONITOR_ACK", mref));
+            heartbeat_manager remote_proxy conn_key [ handler ]
+                              (fn () => send (caller, ("DONE", mref, pid, (1, "Monitor connection timed out"))))
+          else
+            send (caller, ("TIMEOUT", mref)) (* ...? should this be handled? *)
+        end
+
+    fun monitorremote nodeid pid lev =
+      let val my_pid = self ()
+          (* Create a unique monitor reference *)
+          (* NOTE: implementation detail; does not distinguish between 'regular' uuid and a monitor reference *)
+          val mref = mkuuid ()
+
+          (* Spawn a local monitor proxy, to handle inter-node connection/communication *)
+          val proxy = spawn (fn () => local_monitor_proxy my_pid nodeid pid lev mref)
+
+          (* Wait for acknowledgement from local proxy *)
+          val _ = receive [ hn ("MONITOR_ACK", mref') when mref = mref' => ()
+                          (* , hn ("TIMEOUT", mref') when mref = mref' => () *) (* ...wait for timeout? *)
+                          ]
+      in
+        mref (* Return the monitor reference *)
+      end
+
+    fun destruct_monitor_arg (pid, lev) = (pid, lev)      (* Check if argument is a tuple of pid + lev *)
+      | destruct_monitor_arg pid        = (pid, _pc ())   (* default to pc if level is not provided    *)
+
+    fun monitor p =
+        let val localnode  = node (self ())
+            val (pid, lev) = destruct_monitor_arg p
+            val targetnode = node pid
+        in
+          if localnode = targetnode then
+            debugprint "calling monitorlocal";
+            monitorlocal (pid, lev)
+          else
+            debugprint "calling monitorremote";
+            (* 'Manually' raise PC and blocking level while setting up remote monitor *)
+            if true raisedTo lev then
+              monitorremote targetnode pid lev
+            else
+              monitorremote targetnode pid lev
+        end
+
+in [ ("monitor", monitor)
+   ]
+end

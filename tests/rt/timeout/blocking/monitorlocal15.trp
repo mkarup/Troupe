@@ -1,0 +1,13 @@
+let val secret = true raisedTo `{secret}`
+    val p = spawn (fn () =>
+                      receive [ hn _ => () ];
+                      if secret then
+                        1 ^ "crash"
+                      else
+                        _blockThread ()
+                  )
+    val _ = monitorlocal (p, `{}`)
+in
+  send (p, 42);
+  receive [ hn m => m ]
+end

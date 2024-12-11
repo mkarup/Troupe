@@ -1,0 +1,6 @@
+let val p = spawn (fn () => sleep 750)
+    val monRef = monitorlocal (p, `{secret}`)
+in
+  adv ()
+end
+  

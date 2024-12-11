@@ -1,0 +1,4 @@
+let val p = spawn (fn () => sleep 750)
+in
+  monitorlocal (p, 42)
+end

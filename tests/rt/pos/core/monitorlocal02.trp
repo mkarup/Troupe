@@ -1,0 +1,6 @@
+let val p = spawn (fn () => receive [ hn x => "crash" ^ 1 ])
+    val monRef = monitorlocal (p, `{}`)
+    val _ = send (p, 42)
+in
+  receive [ hn x => x ]
+end

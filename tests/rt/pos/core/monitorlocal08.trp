@@ -1,0 +1,10 @@
+let val p = spawn (fn () => receive [ hn x => "crash" ^ 1 ])
+    val monRef = monitorlocal (p, `{}`)
+    val _ = send (p, 42)
+in
+  receive [ hn (str, monRef', from, reason) =>
+            case reason of
+                (1, errStr) => true
+              | _ => false
+          ]
+end

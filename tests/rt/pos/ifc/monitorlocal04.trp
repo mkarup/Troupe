@@ -1,0 +1,9 @@
+let val p = spawn (fn () =>
+                      if true raisedTo `{secret}` then
+                        receive [ hn x => "crash" ^ 1 ]
+                      else ())
+    val monRef = monitorlocal (p, `{secret}`)
+    val _ = send (p, 42)
+in
+  rcvp (`{secret}`, [ hn x => x ])
+end

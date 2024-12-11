@@ -1,0 +1,9 @@
+let val p = spawn (fn () => receive [ hn x => () ])
+    val _ = let pini authority
+                val _ =monitorlocal (p, `{secret}`)
+            in ()
+            end
+    val _ = send (p, 42)
+in
+  rcvp(`{secret}`, [ hn x => x ]) (* Still need to receive at monitor level *)
+end
